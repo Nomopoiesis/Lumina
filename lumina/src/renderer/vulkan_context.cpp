@@ -157,9 +157,9 @@ IsDeviceSuitable(VkPhysicalDevice device,
          swap_chain_adequate;
 }
 
-VulkanContext::VulkanContext(VkInstance instance_,
+VulkanContext::VulkanContext(LuminaRenderer *renderer, VkInstance instance_,
                              VkSurfaceKHR surface_) noexcept
-    : instance(instance_), surface(surface_),
+    : renderer(renderer), instance(instance_), surface(surface_),
       swap_chain_image_format(VK_FORMAT_UNDEFINED),
       swap_chain_image_extent({}) {
   required_extensions = {
@@ -169,10 +169,11 @@ VulkanContext::VulkanContext(VkInstance instance_,
 }
 
 VulkanContext::VulkanContext(VulkanContext &&other) noexcept
-    : is_initialized(other.is_initialized), instance(other.instance),
-      surface(other.surface), physical_device(other.physical_device),
-      device(other.device), graphics_queue(other.graphics_queue),
-      present_queue(other.present_queue), swap_chain(other.swap_chain),
+    : renderer(other.renderer), is_initialized(other.is_initialized),
+      instance(other.instance), surface(other.surface),
+      physical_device(other.physical_device), device(other.device),
+      graphics_queue(other.graphics_queue), present_queue(other.present_queue),
+      swap_chain(other.swap_chain),
       swap_chain_images(std::move(other.swap_chain_images)),
       swap_chain_image_format(other.swap_chain_image_format),
       swap_chain_image_extent(other.swap_chain_image_extent),
@@ -180,6 +181,7 @@ VulkanContext::VulkanContext(VulkanContext &&other) noexcept
       swap_chain_image_ready_to_present_semaphores(
           std::move(other.swap_chain_image_ready_to_present_semaphores)),
       required_extensions(std::move(other.required_extensions)) {
+  other.renderer = nullptr;
   other.instance = VK_NULL_HANDLE;
   other.surface = VK_NULL_HANDLE;
   other.physical_device = VK_NULL_HANDLE;
@@ -199,6 +201,7 @@ VulkanContext::VulkanContext(VulkanContext &&other) noexcept
 auto VulkanContext::operator=(VulkanContext &&other) noexcept
     -> VulkanContext & {
   if (this != &other) {
+    renderer = other.renderer;
     instance = other.instance;
     surface = other.surface;
     physical_device = other.physical_device;
@@ -214,6 +217,7 @@ auto VulkanContext::operator=(VulkanContext &&other) noexcept
         std::move(other.swap_chain_image_ready_to_present_semaphores);
     required_extensions = std::move(other.required_extensions);
     is_initialized = other.is_initialized;
+    other.renderer = nullptr;
     other.instance = VK_NULL_HANDLE;
     other.surface = VK_NULL_HANDLE;
     other.physical_device = VK_NULL_HANDLE;
@@ -321,17 +325,8 @@ auto VulkanContext::ResetContext() noexcept -> void {
     }
   }
   swap_chain_image_ready_to_present_semaphores.clear();
-  for (auto &image_view : image_views) {
-    if (image_view != VK_NULL_HANDLE) {
-      vkDestroyImageView(device, image_view, nullptr);
-      image_view = VK_NULL_HANDLE;
-    }
-  }
-  image_views.clear();
-  if (swap_chain != VK_NULL_HANDLE) {
-    vkDestroySwapchainKHR(device, swap_chain, nullptr);
-    swap_chain = VK_NULL_HANDLE;
-  }
+  DestroyImageViews();
+  DestroySwapChain();
   if (device != VK_NULL_HANDLE) {
     vkDestroyDevice(device, nullptr);
     device = VK_NULL_HANDLE;
@@ -344,6 +339,43 @@ auto VulkanContext::ResetContext() noexcept -> void {
   swap_chain_image_extent = {};
   swap_chain_image_ready_to_present_semaphores.clear();
   is_initialized = false;
+}
+
+auto VulkanContext::DestroySwapChain() noexcept -> void {
+  if (swap_chain != VK_NULL_HANDLE) {
+    vkDestroySwapchainKHR(device, swap_chain, nullptr);
+    swap_chain = VK_NULL_HANDLE;
+  }
+}
+
+auto VulkanContext::DestroyImageViews() noexcept -> void {
+  for (auto &image_view : image_views) {
+    if (image_view != VK_NULL_HANDLE) {
+      vkDestroyImageView(device, image_view, nullptr);
+      image_view = VK_NULL_HANDLE;
+    }
+  }
+  image_views.clear();
+}
+
+auto VulkanContext::RecreateSwapChain() noexcept
+    -> std::expected<void, VkInitializationError> {
+  ASSERT(is_initialized, "Vulkan context is not initialized");
+  ASSERT(device != VK_NULL_HANDLE, "Device is null");
+  vkDeviceWaitIdle(device);
+  DestroyImageViews();
+  DestroySwapChain();
+  auto create_swap_chain_result = CreateSwapChain();
+  if (!create_swap_chain_result) {
+    return std::unexpected(create_swap_chain_result.error());
+  }
+
+  auto create_image_views_result = CreateImageViews();
+  if (!create_image_views_result) {
+    return std::unexpected(create_image_views_result.error());
+  }
+
+  return std::expected<void, VkInitializationError>{};
 }
 
 auto VulkanContext::CreateSemaphore() const noexcept

@@ -18,6 +18,15 @@ static auto WinLuminaWindowProc(HWND hwnd, UINT msg, WPARAM wparam,
       window.Close();
       PostQuitMessage(0);
     } break;
+    case WM_SIZE: {
+      static bool is_first_resize = true;
+      if (is_first_resize) {
+        is_first_resize = false;
+        return result;
+      }
+      auto &engine = core::LuminaEngine::Instance();
+      engine.WindowResized();
+    } break;
     default: {
       result = DefWindowProcA(hwnd, msg, wparam, lparam);
     } break;
@@ -55,8 +64,7 @@ auto Window::Create(HINSTANCE instance, const char *title, u32 pos_x, u32 pos_y,
   // Create window
   HWND window_handle = CreateWindowExA(
       0, window_class.lpszClassName, title,
-      (WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS) &
-          ~WS_THICKFRAME,
+      (WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS),
       init_window_size.left, init_window_size.top,
       (init_window_size.right - init_window_size.left),
       (init_window_size.bottom - init_window_size.top), nullptr, nullptr,

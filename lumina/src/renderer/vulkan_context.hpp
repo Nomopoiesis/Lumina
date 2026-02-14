@@ -11,6 +11,8 @@
 
 namespace lumina::renderer {
 
+class LuminaRenderer;
+
 struct VkInitializationError {
   std::string message;
 };
@@ -27,7 +29,8 @@ public:
   };
 
   VulkanContext() noexcept = default;
-  VulkanContext(VkInstance instance_, VkSurfaceKHR surface_) noexcept;
+  VulkanContext(LuminaRenderer *renderer, VkInstance instance_,
+                VkSurfaceKHR surface_) noexcept;
   VulkanContext(VulkanContext &&other) noexcept;
   auto operator=(VulkanContext &&other) noexcept -> VulkanContext &;
 
@@ -66,6 +69,9 @@ public:
   auto CreateCommandBuffer(VkCommandPool command_pool) const noexcept
       -> std::expected<VkCommandBuffer, VkInitializationError>;
 
+  auto RecreateSwapChain() noexcept
+      -> std::expected<void, VkInitializationError>;
+
 private:
   auto SelectPhysicalDevice() noexcept
       -> std::expected<void, VkInitializationError>;
@@ -74,6 +80,11 @@ private:
   auto CreateSwapChain() noexcept -> std::expected<void, VkInitializationError>;
   auto CreateImageViews() noexcept
       -> std::expected<void, VkInitializationError>;
+
+  auto DestroySwapChain() noexcept -> void;
+  auto DestroyImageViews() noexcept -> void;
+
+  LuminaRenderer *renderer = nullptr;
 
   bool is_initialized = false;
 

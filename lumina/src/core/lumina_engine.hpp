@@ -46,6 +46,8 @@ public:
     window_dimensions = dimensions;
   }
 
+  auto WindowResized() -> void { renderer->SetFramebufferResized(true); }
+
   [[nodiscard]] auto GetWindowDimensions() const -> const WindowDimensions & {
     return window_dimensions;
   }
