@@ -12,6 +12,7 @@ LuminaRenderer::LuminaRenderer(platform::common::vulkan::VkInitializationResult
     : vulkan_context(vulkan_init_result.instance, vulkan_init_result.surface) {}
 
 LuminaRenderer::~LuminaRenderer() noexcept {
+  LOG_TRACE("Destroying Lumina Vulkan Renderer...");
   // Clear frame contexts first so semaphores/fences adn frame command buffers
   // are destroyed before the command pool.
   frame_contexts.clear();
@@ -28,6 +29,7 @@ LuminaRenderer::~LuminaRenderer() noexcept {
 }
 
 auto LuminaRenderer::Initialize() -> void {
+  LOG_TRACE("Initializing Lumina Vulkan Renderer...");
   if (!vulkan_context.Initialize()) {
     LOG_ERROR("Failed to initialize Vulkan context: {}",
               vulkan_context.Initialize().error().message);

@@ -18,7 +18,9 @@ target_sources(
             logger/log_target.hpp
             logger/console_target.hpp
             logger/file_target.hpp
-            logger/logger.hpp)
+            logger/logger.hpp
+            data_structures/lock_free_pool.hpp
+            data_structures/work_stealing_deque.hpp)
 
 # Logger implementation library - STATIC library for logger source files
 add_library(lumina_logger STATIC)

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <thread>
 
 namespace lumina::platform::common {
 
@@ -38,8 +39,14 @@ public:
       void (*close_file)(void *handle), bool (*delete_file)(const char *path),
       void *(*create_console)(),
       void (*write_console)(void *handle, const char *text, std::size_t length),
-      void (*wait_console_keypress)())
-      -> void {
+      void (*wait_console_keypress)(),
+      void (*set_thread_name)(const char *name),
+      void (*pin_thread)(std::thread::native_handle_type thread_handle,
+                         size_t core_index),
+      void *(*create_fiber)(std::size_t stack_size,
+                            void (*entry_point)(void *data), void *data),
+      void *(*convert_thread_to_fiber)(void *data),
+      void (*switch_to_fiber)(void *from_fiber, void *to_fiber)) -> void {
     auto &instance = GetStaticInstance();
     instance.LuminaCreateFile = create_file;
     instance.LuminaOpenFile = open_file;
@@ -51,7 +58,11 @@ public:
     instance.LuminaCreateConsole = create_console;
     instance.LuminaWriteConsole = write_console;
     instance.LuminaWaitConsoleKeypress = wait_console_keypress;
-
+    instance.LuminaSetThreadName = set_thread_name;
+    instance.LuminaPinThread = pin_thread;
+    instance.LuminaCreateFiber = create_fiber;
+    instance.LuminaConvertThreadToFiber = convert_thread_to_fiber;
+    instance.LuminaSwitchToFiber = switch_to_fiber;
     instance.is_initialized_ = true;
   }
 
@@ -96,6 +107,30 @@ public:
   // Waits for a key press on the console, typically used at shutdown to keep
   // the console window open long enough to inspect log output.
   void (*LuminaWaitConsoleKeypress)() = nullptr;
+
+  // Threading operations
+
+  // Specify name of the thread - for debugging purposes
+  void (*LuminaSetThreadName)(const char *name) = nullptr;
+
+  // Pin a thread to a specific core
+  void (*LuminaPinThread)(std::thread::native_handle_type thread_handle,
+                          size_t core_index) = nullptr;
+
+  // Crete a new fiber
+  // Returns a fiber handle
+  void *(*LuminaCreateFiber)(std::size_t stack_size,
+                             void (*entry_point)(void *data),
+                             void *data) = nullptr;
+
+  // Converts a thread to a fiber
+  // Returns a fiber handle
+  void *(*LuminaConvertThreadToFiber)(void *data) = nullptr;
+
+  // Switches to a fiber
+  // from_fiber: the fiber to switch from
+  // to_fiber: the fiber to switch to
+  void (*LuminaSwitchToFiber)(void *from_fiber, void *to_fiber) = nullptr;
 
 private:
   PlatformServices() noexcept = default;

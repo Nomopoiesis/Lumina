@@ -4,6 +4,8 @@
 #include <stdexcept>
 
 #include "platform/common/vulkan/vulkan_init_result.hpp"
+
+#include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
 
 namespace lumina::core {
@@ -63,6 +65,7 @@ private:
   bool is_initialized = false;
 
   WindowDimensions window_dimensions{};
+  std::unique_ptr<job_system::JobManager> job_manager = nullptr;
   std::unique_ptr<renderer::LuminaRenderer> renderer = nullptr;
 };
 
