@@ -43,5 +43,8 @@ include(cmake/CompilerOptions.cmake)
 # Include all required dependencies
 include(cmake/Dependencies.cmake)
 
+# Add third-party libraries
+add_subdirectory(third_party)
+
 # Add subdirectories
 add_subdirectory(lumina)

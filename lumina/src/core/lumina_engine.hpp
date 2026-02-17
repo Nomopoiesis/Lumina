@@ -5,7 +5,9 @@
 
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
+#include "core/camera.hpp"
 #include "job_system/job_manager.hpp"
+#include "math/vector.hpp"
 #include "renderer/renderer.hpp"
 
 namespace lumina::core {
@@ -17,7 +19,12 @@ struct WindowDimensions {
 
 struct LuminaInitializeInfo {
   platform::common::vulkan::VkInitializationResult vulkan_init_result;
-  WindowDimensions window_dimensions;
+  WindowDimensions window_dimensions{};
+};
+
+struct FrameTimeInfo {
+  f64 delta_time;
+  f64 total_time;
 };
 
 class LuminaEngine {
@@ -52,8 +59,26 @@ public:
     return window_dimensions;
   }
 
+  [[nodiscard]] auto GetFrameTimeInfo() const -> const FrameTimeInfo & {
+    return frame_time_info;
+  }
+  [[nodiscard]] auto GetFrameDeltaTime() const -> f64 {
+    return frame_time_info.delta_time;
+  }
+  [[nodiscard]] auto GetFrameTotalTime() const -> f64 {
+    return frame_time_info.total_time;
+  }
+  [[nodiscard]] auto GetFrameDeltaTimeF() const -> f32 {
+    return static_cast<f32>(frame_time_info.delta_time);
+  }
+  [[nodiscard]] auto GetFrameTotalTimeF() const -> f32 {
+    return static_cast<f32>(frame_time_info.total_time);
+  }
+
+  [[nodiscard]] auto GetCamera() const -> const Camera & { return camera; }
+
   // This is the main frame executor
-  auto ExecuteFrame() -> void;
+  auto ExecuteFrame(f64 delta_time) -> void;
 
 private:
   LuminaEngine() noexcept = default;
@@ -65,6 +90,10 @@ private:
   }
 
   bool is_initialized = false;
+
+  FrameTimeInfo frame_time_info{};
+
+  Camera camera;
 
   WindowDimensions window_dimensions{};
   std::unique_ptr<job_system::JobManager> job_manager = nullptr;

@@ -1,0 +1,32 @@
+#pragma once
+
+#include <cmath>
+#include <numbers>
+
+#include "lumina_types.hpp"
+
+namespace lumina::math {
+
+constexpr f32 PI = std::numbers::pi_v<float>;
+constexpr f32 TWO_PI = std::numbers::pi_v<float> * 2.0F;
+
+inline auto DegreesToRadians(f32 degrees) -> f32 {
+  return degrees * (PI / 180.0F);
+}
+
+inline auto RadiansToDegrees(f32 radians) -> f32 {
+  return radians * (180.0F / PI);
+}
+
+inline auto Sin(f32 angle) -> f32 { return std::sin(angle); }
+
+inline auto Cos(f32 angle) -> f32 { return std::cos(angle); }
+
+inline auto Tan(f32 angle) -> f32 { return std::tan(angle); }
+
+inline auto ATan(f32 Rad) -> f32 { return std::atanf(Rad); }
+
+inline auto ATan2(f32 y, f32 x) -> f32 { return std::atan2f(y, x); }
+
+} // namespace lumina::math
+

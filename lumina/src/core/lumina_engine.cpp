@@ -1,5 +1,7 @@
 #include "lumina_engine.hpp"
 
+#include <algorithm>
+
 #include "common/logger/logger.hpp"
 
 namespace lumina::core {
@@ -78,7 +80,20 @@ static auto TestJobSystem() -> void {
 
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   auto &instance = GetStaticInstance();
-  //TestJobSystem();
+  // TestJobSystem();
+  Transform transform = {
+      .position = {2.0F, 2.0F, 2.0F},
+      .rotation = {-45.0F, 45.0F, 0.0F},
+      .scale = {1.0F, 1.0F, 1.0F},
+  };
+  CameraSettings camera_settings = {
+      .fov_degrees = 45.0F,
+      .aspect_ratio = static_cast<f32>(init_info.window_dimensions.width) /
+                      static_cast<f32>(init_info.window_dimensions.height),
+      .near_plane = 0.1F,
+      .far_plane = 10.0F,
+  };
+  instance.camera = Camera(transform, camera_settings);
   instance.window_dimensions = init_info.window_dimensions;
   instance.job_manager = std::make_unique<job_system::JobManager>();
   instance.job_manager->Initialize({.num_workers = 0, .fiber_pool_size = 1024});
@@ -96,6 +111,12 @@ auto LuminaEngine::Shutdown() -> void {
   instance.is_initialized = false;
 }
 
-auto LuminaEngine::ExecuteFrame() -> void { renderer->DrawFrame(); }
+auto LuminaEngine::ExecuteFrame(f64 delta_time) -> void {
+  // Clamp the delta time to 0.1 seconds to prevent large jumps in time
+  delta_time = std::clamp<f64>(delta_time, 0.0, 0.1F);
+  frame_time_info.delta_time = delta_time;
+  frame_time_info.total_time += delta_time;
+  renderer->DrawFrame();
+}
 
 } // namespace lumina::core
