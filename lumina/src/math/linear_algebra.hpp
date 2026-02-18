@@ -58,10 +58,25 @@ inline auto Dot(const Mat3 &m, const Mat3 &n) -> Mat3 {
 
 inline auto Dot(const Mat4 &m, const Mat4 &n) -> Mat4 {
   Mat4 result;
-  result[0] = Dot(m[0], Vec4(n[0].x, n[1].x, n[2].x, n[3].x));
-  result[1] = Dot(m[1], Vec4(n[0].y, n[1].y, n[2].y, n[3].y));
-  result[2] = Dot(m[2], Vec4(n[0].z, n[1].z, n[2].z, n[3].z));
-  result[3] = Dot(m[3], Vec4(n[0].w, n[1].w, n[2].w, n[3].w));
+  result[0].x = Dot(m[0], Vec4(n[0].x, n[1].x, n[2].x, n[3].x));
+  result[0].y = Dot(m[0], Vec4(n[0].y, n[1].y, n[2].y, n[3].y));
+  result[0].z = Dot(m[0], Vec4(n[0].z, n[1].z, n[2].z, n[3].z));
+  result[0].w = Dot(m[0], Vec4(n[0].w, n[1].w, n[2].w, n[3].w));
+
+  result[1].x = Dot(m[1], Vec4(n[0].x, n[1].x, n[2].x, n[3].x));
+  result[1].y = Dot(m[1], Vec4(n[0].y, n[1].y, n[2].y, n[3].y));
+  result[1].z = Dot(m[1], Vec4(n[0].z, n[1].z, n[2].z, n[3].z));
+  result[1].w = Dot(m[1], Vec4(n[0].w, n[1].w, n[2].w, n[3].w));
+
+  result[2].x = Dot(m[2], Vec4(n[0].x, n[1].x, n[2].x, n[3].x));
+  result[2].y = Dot(m[2], Vec4(n[0].y, n[1].y, n[2].y, n[3].y));
+  result[2].z = Dot(m[2], Vec4(n[0].z, n[1].z, n[2].z, n[3].z));
+  result[2].w = Dot(m[2], Vec4(n[0].w, n[1].w, n[2].w, n[3].w));
+
+  result[3].x = Dot(m[3], Vec4(n[0].x, n[1].x, n[2].x, n[3].x));
+  result[3].y = Dot(m[3], Vec4(n[0].y, n[1].y, n[2].y, n[3].y));
+  result[3].z = Dot(m[3], Vec4(n[0].z, n[1].z, n[2].z, n[3].z));
+  result[3].w = Dot(m[3], Vec4(n[0].w, n[1].w, n[2].w, n[3].w));
   return result;
 }
 
@@ -72,4 +87,3 @@ inline auto Cross(const Vec3 &a, const Vec3 &b) -> Vec3 {
 }
 
 } // namespace lumina::math
-

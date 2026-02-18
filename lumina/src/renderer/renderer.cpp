@@ -3,6 +3,7 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
 #include "core/lumina_engine.hpp"
+#include "glm/fwd.hpp"
 #include "shaders/shader_module_cache.hpp"
 
 #include "math/matrix.hpp"
@@ -12,15 +13,17 @@
 #include <array>
 
 #define GLM_FORCE_RADIANS
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 namespace lumina::renderer {
 
 struct UniformBufferObject {
-  math::Mat4 model;
-  glm::mat4 view;
-  glm::mat4 proj;
+  alignas(16) math::Mat4 model;
+  alignas(16) math::Mat4 view;
+  alignas(16) math::Mat4 proj;
 };
 
 struct Vertex {
@@ -409,16 +412,8 @@ static auto UpdateUniformBuffer(VulkanContext &vulkan_context, VkBuffer &buffer,
   auto camera = core::LuminaEngine::Instance().GetCamera();
   UniformBufferObject ubo = {};
   ubo.model = math::Mat4::Identity();
-  // ubo.view = camera.GetViewMatrix();
-  ubo.view =
-      glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
-                  glm::vec3(0.0f, 0.0f, 1.0f));
-  // ubo.proj = camera.GetProjectionMatrix();
-  ubo.proj = glm::perspective(
-      glm::radians(45.0f),
-      vulkan_context.GetSwapChainImageExtent().width /
-          (float)vulkan_context.GetSwapChainImageExtent().height,
-      0.1f, 10.0f);
+  ubo.view = camera.GetViewMatrix();
+  ubo.proj = camera.GetProjectionMatrix();
   ubo.proj[1][1] *= -1;
   memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
@@ -456,11 +451,6 @@ LuminaRenderer::~LuminaRenderer() noexcept {
       vkFreeMemory(vulkan_context.GetDevice(), uniform_buffers_memory[i],
                    nullptr);
     }
-  }
-
-  if (descriptor_set_layout != VK_NULL_HANDLE) {
-    vkDestroyDescriptorSetLayout(vulkan_context.GetDevice(),
-                                 descriptor_set_layout, nullptr);
   }
 
   if (vertex_buffer != VK_NULL_HANDLE) {

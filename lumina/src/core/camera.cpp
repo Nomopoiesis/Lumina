@@ -38,23 +38,17 @@ auto CalculateOrthographicMatrix(f32 ortho_width, f32 ortho_height,
 }
 
 auto CalculateViewMatrix(const Transform &transform) -> math::Mat4 {
-  math::Mat4 result{};
-
-  // Set rotation part
   auto forward = transform.Forward();
   auto right = transform.Right();
   auto local_up = transform.Up();
 
-  auto rot = math::Mat4::Identity();
-  rot[0] = math::Vec4(right, 0.0F);
-  rot[1] = math::Vec4(local_up, 0.0F);
-  rot[2] = math::Vec4(-forward, 0.0F);
-
-  // Set translation part
-  auto pos = math::Mat4::Identity();
-  pos[3] = math::Vec4{-transform.position, 1.0F};
-
-  result = math::Dot(rot.T(), pos);
+  auto result = math::Mat4::Identity();
+  result[0] = math::Vec4(right.x, local_up.x, -forward.x, 0);
+  result[1] = math::Vec4(right.y, local_up.y, -forward.y, 0);
+  result[2] = math::Vec4(right.z, local_up.z, -forward.z, 0);
+  result[3] = math::Vec4(-math::Dot(right, transform.position),
+                         -math::Dot(local_up, transform.position),
+                         math::Dot(forward, transform.position), 1.0F);
 
   return result;
 }
