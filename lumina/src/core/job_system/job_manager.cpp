@@ -14,7 +14,8 @@ namespace lumina::core::job_system {
 
 auto JobManager::Initialize(JobManagerInitializeInfo initialize_info) -> void {
   if (is_initialized_) {
-    throw std::runtime_error("JobManager already initialized");
+    LOG_CRITICAL("JobManager already initialized");
+    std::terminate();
   }
 
   if (initialize_info.num_workers == 0) {
@@ -208,9 +209,12 @@ auto JobManager::SubmitJob(Job *job) -> void {
       return;
     }
   }
-  LOG_ERROR("Failed to submit job to any worker, this will lead to a lost job, "
-            "and potential deadlock");
-  throw std::runtime_error("Failed to submit job to any worker");
+
+  // TODO: This is a critical error, we should handle it better
+  LOG_CRITICAL(
+      "Failed to submit job to any worker, this will lead to a lost job, "
+      "and potential deadlock");
+  std::terminate();
 }
 
 auto JobManager::WaitForCounter(Counter *counter) -> void {
@@ -269,11 +273,11 @@ auto JobManager::Signal(Counter *counter) -> void {
           u32 retry_count = 0;
           while (!resume_queue.Push(handle)) {
             if (retry_count > 100) {
-              LOG_ERROR(
-                  "Failed to push fiber handle to resume queue, this will "
-                  "lead to a lost job, and potential deadlock");
-              throw std::runtime_error(
-                  "Failed to push fiber handle to resume queue");
+              // TODO: This is a critical error, we should handle it better
+              LOG_CRITICAL(
+                  "Failed to push fiber handle to resume queue, this will lead "
+                  "to a lost job, and potential deadlock");
+              std::terminate();
             }
             retry_count++;
             std::this_thread::yield();

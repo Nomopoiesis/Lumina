@@ -75,6 +75,11 @@ private:
   VkImage texture_image = VK_NULL_HANDLE;
   VkImageView texture_image_view = VK_NULL_HANDLE;
   VkSampler texture_sampler = VK_NULL_HANDLE;
+
+  VkFormat depth_stencil_format = VK_FORMAT_UNDEFINED;
+  VkDeviceMemory depth_image_memory = VK_NULL_HANDLE;
+  VkImage depth_image = VK_NULL_HANDLE;
+  VkImageView depth_image_view = VK_NULL_HANDLE;
 };
 
 } // namespace lumina::renderer

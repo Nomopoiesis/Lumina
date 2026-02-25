@@ -18,9 +18,10 @@ auto Logger::Initialize(
   std::lock_guard<std::mutex> lock(logger.init_mutex_);
 
   if (logger.is_initialized_) {
-    throw std::runtime_error(
+    std::print(
         "Logger already initialized, initializing logger multiple times is not "
         "allowed, Consider Shutdown() first");
+    std::terminate();
   }
 
   logger.platform_services_ = &platform_services;
@@ -66,8 +67,9 @@ auto Logger::Shutdown() -> void {
   auto &logger = GetStaticInstance();
   std::lock_guard<std::mutex> lock(logger.init_mutex_);
   if (!logger.is_initialized_) {
-    throw std::runtime_error(
+    std::print(
         "Logger not initialized, cannot shutdown, Consider Initialize() first");
+    std::terminate();
   }
   // Signal worker thread to stop
   logger.should_stop_ = true;
@@ -187,11 +189,7 @@ Logger::~Logger() {
   // Ensure clean shutdown at process exit if the user did not call
   // Shutdown() explicitly, but never throw from a destructor.
   if (is_initialized_) {
-    try {
-      Shutdown();
-    } catch (...) {
-      // Swallow all exceptions in destructor context.
-    }
+    Shutdown();
   }
 }
 
