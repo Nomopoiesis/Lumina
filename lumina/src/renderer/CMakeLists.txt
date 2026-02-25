@@ -8,5 +8,5 @@ target_sources(
   lumina_renderer PRIVATE renderer.cpp vulkan_context.cpp frame_context.cpp
                           shaders/shader_module_cache.cpp)
 
-target_link_libraries(lumina_renderer PRIVATE lumina_common)
+target_link_libraries(lumina_renderer PRIVATE lumina_common lumina_stb)
 target_link_libraries(lumina_renderer PUBLIC Vulkan::Vulkan glm::glm)

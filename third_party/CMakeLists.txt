@@ -12,10 +12,18 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(glm)
 
 # external stb_truetype.h
-add_library(stb_truetype INTERFACE)
+add_library(lumina_stb INTERFACE)
 
 target_sources(
-  stb_truetype INTERFACE FILE_SET HEADERS BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
-                         FILES stb_truetype.h)
+  lumina_stb
+  INTERFACE FILE_SET
+            HEADERS
+            BASE_DIRS
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            FILES
+            stb_truetype.h
+            stb_image.h)
 
-target_include_directories(stb_truetype INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(lumina_stb INTERFACE -w)
+
+target_include_directories(lumina_stb INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
