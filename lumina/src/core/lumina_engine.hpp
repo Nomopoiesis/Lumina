@@ -3,9 +3,13 @@
 #include <memory>
 
 #include "common/logger/logger.hpp"
+#include "common/lumina_terminate.hpp"
+#include "math/basic.hpp"
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
-#include "core/camera.hpp"
+#include "camera.hpp"
+#include "input/input_dispatcher.hpp"
+#include "input/input_state.hpp"
 #include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
 
@@ -26,13 +30,29 @@ struct FrameTimeInfo {
   f64 total_time;
 };
 
+class LuminaEngine;
+
+class CameraMovementInputHandler : public IInputHandler {
+public:
+  CameraMovementInputHandler(LuminaEngine &engine, Camera &camera) noexcept
+      : engine(engine), camera(camera) {}
+  auto HandleInput(const std::span<const ActionEvent> &action_events)
+      -> void override;
+
+private:
+  LuminaEngine &engine;
+  Camera &camera;
+  f32 move_speed = 0.0001F;
+  f32 look_speed = 0.1F;
+};
+
 class LuminaEngine {
 public:
   static auto Instance() -> LuminaEngine & {
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized) {
       LOG_CRITICAL("LuminaEngine not initialized, call Initialize() first");
-      std::terminate();
+      LUMINA_TERMINATE();
     }
     return instance;
   }
@@ -42,6 +62,9 @@ public:
   LuminaEngine(LuminaEngine &&) noexcept = delete;
   auto operator=(LuminaEngine &&) noexcept -> LuminaEngine & = delete;
 
+  [[nodiscard]] static auto IsInitialized() -> bool {
+    return GetStaticInstance().is_initialized;
+  }
   static auto Initialize(const LuminaInitializeInfo &init_info) -> void;
   static auto Shutdown() -> void;
 
@@ -51,6 +74,15 @@ public:
   auto SetWindowDimensions(const WindowDimensions &dimensions) -> void {
     window_dimensions = dimensions;
   }
+
+  auto SetCursorTrapped(bool trap) -> void {
+    if (trap != trap_cursor) {
+      trap_cursor = trap;
+      platform::common::PlatformServices::Instance().LuminaSetCursorTrapped(
+          trap);
+    }
+  }
+  [[nodiscard]] auto IsCursorTrapped() const -> bool { return trap_cursor; }
 
   auto WindowResized() -> void { renderer->SetFramebufferResized(true); }
 
@@ -76,6 +108,11 @@ public:
 
   [[nodiscard]] auto GetCamera() const -> const Camera & { return camera; }
 
+  auto GetInputState() -> InputState & { return input_state; }
+  [[nodiscard]] auto GetInputState() const -> const InputState & {
+    return input_state;
+  }
+
   // This is the main frame executor
   auto ExecuteFrame(f64 delta_time) -> void;
 
@@ -90,9 +127,16 @@ private:
 
   bool is_initialized = false;
 
+  bool trap_cursor = false;
+
   FrameTimeInfo frame_time_info{};
 
   Camera camera;
+  std::unique_ptr<CameraMovementInputHandler> camera_movement_input_handler =
+      std::make_unique<CameraMovementInputHandler>(*this, camera);
+
+  InputState input_state;
+  InputDispatcher input_dispatcher;
 
   WindowDimensions window_dimensions{};
   std::unique_ptr<job_system::JobManager> job_manager = nullptr;

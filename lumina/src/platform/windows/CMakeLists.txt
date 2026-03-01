@@ -12,11 +12,19 @@ set_target_properties(windows_lumina PROPERTIES WIN32_EXECUTABLE TRUE)
 # Output name (CMake will automatically add .exe on Windows)
 set_target_properties(windows_lumina PROPERTIES OUTPUT_NAME lumina)
 
+target_compile_definitions(
+  windows_lumina
+  PRIVATE NOMINMAX # prevents min/max macro pollution from minwindef.h
+          WIN32_LEAN_AND_MEAN # reduces Windows.h include size, optional but
+                              # good practice
+)
+
 add_subdirectory(vulkan)
 
 target_link_libraries(
-  windows_lumina PRIVATE lumina_common lumina_logger lumina_platform_common
-                         windows_lumina_vulkan lumina_core)
+  windows_lumina
+  PRIVATE lumina_common lumina_logger lumina_platform_common
+          lumina_common_terminate windows_lumina_vulkan lumina_core)
 
 target_link_libraries(
   windows_lumina

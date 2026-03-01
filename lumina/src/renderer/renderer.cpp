@@ -2,6 +2,7 @@
 
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
+#include "common/lumina_terminate.hpp"
 #include "core/lumina_engine.hpp"
 #include "shaders/shader_module_cache.hpp"
 
@@ -412,7 +413,7 @@ static auto CreateVertexBuffer(VulkanContext &vulkan_context,
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                     staging_buffer_memory, staging_buffer)) {
     LOG_CRITICAL("Failed to create vertex staging buffer");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   void *data = nullptr;
@@ -427,7 +428,7 @@ static auto CreateVertexBuffer(VulkanContext &vulkan_context,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory, buffer)) {
     LOG_CRITICAL("Failed to create vertex buffer");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
   auto copy_result = DeviceCopyBuffer(vulkan_context, command_pool,
                                       staging_buffer, buffer, size);
@@ -451,7 +452,7 @@ static auto CreateIndexBuffer(VulkanContext &vulkan_context,
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                     staging_buffer_memory, staging_buffer)) {
     LOG_CRITICAL("Failed to create index staging buffer");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   void *data = nullptr;
@@ -466,7 +467,7 @@ static auto CreateIndexBuffer(VulkanContext &vulkan_context,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory, buffer)) {
     LOG_CRITICAL("Failed to create index buffer");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
   auto copy_result = DeviceCopyBuffer(vulkan_context, command_pool,
                                       staging_buffer, buffer, size);
@@ -870,14 +871,14 @@ auto LuminaRenderer::Initialize() -> void {
   if (!vulkan_context.Initialize()) {
     LOG_CRITICAL("Failed to initialize Vulkan context: {}",
                  vulkan_context.Initialize().error().message);
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   auto command_pool_result = vulkan_context.CreateCommandPool();
   if (!command_pool_result) {
     LOG_CRITICAL("Failed to create command pool: {}",
                  command_pool_result.error().message);
-    std::terminate();
+    LUMINA_TERMINATE();
   }
   command_pool = command_pool_result.value();
 
@@ -888,7 +889,7 @@ auto LuminaRenderer::Initialize() -> void {
   if (!CreatePipelineLayout()) {
     LOG_CRITICAL("Failed to create pipeline layout: {}",
                  CreatePipelineLayout().error().message);
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   auto depth_result = CreateDepthResources(
@@ -899,7 +900,7 @@ auto LuminaRenderer::Initialize() -> void {
   if (!CreatePipeline()) {
     LOG_CRITICAL("Failed to create pipeline: {}",
                  CreatePipeline().error().message);
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   auto res = CreateVertexBuffer(vulkan_context, command_pool,
@@ -945,7 +946,7 @@ auto LuminaRenderer::Initialize() -> void {
     if (!frame_context_result) {
       LOG_CRITICAL("Failed to create frame context: {}",
                    frame_context_result.error().message);
-      std::terminate();
+      LUMINA_TERMINATE();
     }
     frame_contexts.push_back(std::move(frame_context_result.value()));
   }
@@ -972,12 +973,12 @@ auto LuminaRenderer::DrawFrame() -> void {
     if (!recreate_swap_chain_result) {
       LOG_CRITICAL("Failed to recreate swap chain: {}",
                    recreate_swap_chain_result.error().message);
-      std::terminate();
+      LUMINA_TERMINATE();
     }
     return;
   } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
     LOG_CRITICAL("Failed to acquire next image: {}", string_VkResult(result));
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   UpdateUniformBuffer(vulkan_context, uniform_buffers[current_frame_index],
@@ -988,7 +989,7 @@ auto LuminaRenderer::DrawFrame() -> void {
 
   if (vkResetCommandBuffer(frame_context.GetCommandBuffer(), 0) != VK_SUCCESS) {
     LOG_CRITICAL("Failed to reset command buffer");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   if (auto record_command_buffer_result =
@@ -996,7 +997,7 @@ auto LuminaRenderer::DrawFrame() -> void {
       !record_command_buffer_result) {
     LOG_CRITICAL("Failed to record command buffer: {}",
                  record_command_buffer_result.error().message);
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   VkPipelineStageFlags wait_stage_flags[] = {
@@ -1018,7 +1019,7 @@ auto LuminaRenderer::DrawFrame() -> void {
   if (vkQueueSubmit(vulkan_context.GetGraphicsQueue(), 1, &submit_info,
                     frame_context.GetFrameBeginReadyFence()) != VK_SUCCESS) {
     LOG_CRITICAL("Failed to submit command buffer");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   VkPresentInfoKHR present_info = {
@@ -1041,11 +1042,11 @@ auto LuminaRenderer::DrawFrame() -> void {
     if (!recreate_swap_chain_result) {
       LOG_CRITICAL("Failed to recreate swap chain: {}",
                    recreate_swap_chain_result.error().message);
-      std::terminate();
+      LUMINA_TERMINATE();
     }
   } else if (result != VK_SUCCESS) {
     LOG_CRITICAL("Failed to present image: {}", string_VkResult(result));
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   current_frame_index = (current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;

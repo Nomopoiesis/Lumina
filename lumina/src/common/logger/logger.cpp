@@ -2,6 +2,7 @@
 
 #include "console_target.hpp"
 #include "file_target.hpp"
+#include "lumina_terminate.hpp"
 
 #include <chrono>
 #include <sstream>
@@ -21,7 +22,7 @@ auto Logger::Initialize(
     std::print(
         "Logger already initialized, initializing logger multiple times is not "
         "allowed, Consider Shutdown() first");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   logger.platform_services_ = &platform_services;
@@ -69,7 +70,7 @@ auto Logger::Shutdown() -> void {
   if (!logger.is_initialized_) {
     std::print(
         "Logger not initialized, cannot shutdown, Consider Initialize() first");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
   // Signal worker thread to stop
   logger.should_stop_ = true;
@@ -81,18 +82,7 @@ auto Logger::Shutdown() -> void {
   }
 
   // Flush remaining messages
-  std::lock_guard<std::mutex> queue_lock(logger.queue_mutex_);
-  while (!logger.message_queue_.empty()) {
-    const auto &msg = logger.message_queue_.front();
-    std::string formatted = logger.FormatMessage(msg.level, msg.file.c_str(),
-                                                 msg.line, msg.message);
-    for (auto &target : logger.targets_) {
-      if (target) {
-        target->Write(msg.level, formatted);
-      }
-    }
-    logger.message_queue_.pop();
-  }
+  logger.Flush();
 
   // Give each target a chance to perform any shutdown-specific actions.
   if (logger.wait_for_keypress_on_shutdown_) {
@@ -107,6 +97,21 @@ auto Logger::Shutdown() -> void {
   logger.targets_.clear();
 
   logger.is_initialized_ = false;
+}
+
+auto Logger::Flush() -> void {
+  std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+  while (!message_queue_.empty()) {
+    const auto &msg = message_queue_.front();
+    std::string formatted =
+        FormatMessage(msg.level, msg.file.c_str(), msg.line, msg.message);
+    for (auto &target : targets_) {
+      if (target) {
+        target->Write(msg.level, formatted);
+      }
+    }
+    message_queue_.pop();
+  }
 }
 
 auto Logger::WorkerThread() -> void {

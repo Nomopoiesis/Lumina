@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <timeapi.h> // timeBeginPeriod / timeEndPeriod
 
 #include "scope_guard.hpp"
 #include "vulkan/win_vulkan.hpp"
@@ -75,7 +76,9 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   timer.Reset();
   while (window.IsRunning()) {
     auto delta_time = timer.Tick();
+    engine.GetInputState().NewFrame();
     window.ProcessMessages();
+    window.ProcessMouseMovement();
     engine.ExecuteFrame(delta_time);
   }
 

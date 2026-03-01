@@ -1,5 +1,6 @@
 #include "camera.hpp"
 
+#include "math/basic.hpp"
 #include "math/trigonometry.hpp"
 
 namespace lumina::core {
@@ -83,4 +84,15 @@ auto Camera::GetViewProjectionMatrix() const -> math::Mat4 {
 
   return result;
 }
+
+auto Camera::Move(const math::Vec3 &direction) -> void {
+  transform.position += direction;
+}
+
+auto Camera::Rotate(const math::Vec3 &rotation) -> void {
+  transform.rotation += rotation;
+  transform.rotation.pitch =
+      math::Clamp(transform.rotation.pitch, -89.0F, 89.0F);
+}
+
 } // namespace lumina::core
