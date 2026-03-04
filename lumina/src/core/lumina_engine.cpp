@@ -3,11 +3,14 @@
 #include <algorithm>
 
 #include "common/logger/logger.hpp"
-#include "math/basic.hpp"
 
+#include "components/camera.hpp"
+#include "components/transform.hpp"
 #include "input/input_action.hpp"
 
 namespace lumina::core {
+
+using namespace lumina::core::components;
 
 struct FibData {
   int n;
@@ -106,19 +109,7 @@ static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   auto &instance = GetStaticInstance();
   // TestJobSystem();
-  Transform transform = {
-      .position = {2.0F, 2.0F, 2.0F},
-      .rotation = {-35.0F, 45.0F, 0.0F},
-      .scale = {1.0F, 1.0F, 1.0F},
-  };
-  CameraSettings camera_settings = {
-      .fov_degrees = 45.0F,
-      .aspect_ratio = static_cast<f32>(init_info.window_dimensions.width) /
-                      static_cast<f32>(init_info.window_dimensions.height),
-      .near_plane = 0.1F,
-      .far_plane = 10.0F,
-  };
-  instance.camera = Camera(transform, camera_settings);
+
   instance.window_dimensions = init_info.window_dimensions;
   instance.job_manager = std::make_unique<job_system::JobManager>();
   instance.job_manager->Initialize({.num_workers = 0, .fiber_pool_size = 1024});
@@ -126,15 +117,40 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
 
+  instance.camera_movement_controller =
+      std::make_unique<CameraMovementController>(INVALID_ENTITY_ID);
+
   InitializeInputActionMap(instance.input_dispatcher.GetInputActionMap());
   instance.input_dispatcher.RegisterHandler(
-      instance.camera_movement_input_handler.get(), 10);
+      instance.camera_movement_controller.get(), 10);
+
+  // Create the default world (scene)
+  instance.current_world = std::make_unique<World>();
+  auto &world = *instance.current_world;
+
+  // Create a default camera entity in the world
+  auto entity_id = world.CreateEntity();
+  world.AddComponent<Transform>(entity_id, math::Vec3{2.0F, 2.0F, 2.0F},
+                                math::Vec3{-35.0F, 45.0F, 0.0F},
+                                math::Vec3{1.0F, 1.0F, 1.0F});
+  CameraSettings camera_settings = {
+      .fov_degrees = 45.0F,
+      .aspect_ratio = static_cast<f32>(init_info.window_dimensions.width) /
+                      static_cast<f32>(init_info.window_dimensions.height),
+      .near_plane = 0.1F,
+      .far_plane = 10.0F,
+  };
+  world.AddComponent<Camera>(entity_id, camera_settings);
+
+  world.SetActiveCamera(entity_id);
+  instance.camera_movement_controller->SetControlledEntity(entity_id);
 
   instance.is_initialized = true;
 }
 
 auto LuminaEngine::Shutdown() -> void {
   auto &instance = GetStaticInstance();
+  instance.current_world.reset();
   instance.renderer->DeviceWaitIdle();
   instance.job_manager.reset();
   instance.renderer.reset();
@@ -148,53 +164,6 @@ auto LuminaEngine::ExecuteFrame(f64 delta_time) -> void {
   frame_time_info.total_time += delta_time;
   input_dispatcher.Dispatch(input_state);
   renderer->DrawFrame();
-}
-
-auto CameraMovementInputHandler::HandleInput(
-    const std::span<const ActionEvent> &action_events) -> void {
-  math::Vec3 move_direction{};
-  math::Vec3 look_rotation{};
-  bool trap_cursor = false;
-  const auto &transform = camera.GetTransform();
-  for (const auto &action_event : action_events) {
-    if (action_event.action_id == ActionID(std::string_view("MoveForward"))) {
-      move_direction += transform.Forward();
-    }
-    if (action_event.action_id == ActionID(std::string_view("MoveBackward"))) {
-      move_direction -= transform.Forward();
-    }
-    if (action_event.action_id == ActionID(std::string_view("MoveLeft"))) {
-      move_direction -= transform.Right();
-    }
-    if (action_event.action_id == ActionID(std::string_view("MoveRight"))) {
-      move_direction += transform.Right();
-    }
-    if (action_event.action_id == ActionID(std::string_view("MoveUp"))) {
-      move_direction += EngineCoordinates::UP;
-    }
-    if (action_event.action_id == ActionID(std::string_view("MoveDown"))) {
-      move_direction -= EngineCoordinates::UP;
-    }
-    if (action_event.action_id == ActionID(std::string_view("LookVertical"))) {
-      look_rotation.pitch += -action_event.axis_value;
-      look_rotation.pitch = math::Clamp(look_rotation.pitch, -89.0F, 89.0F);
-    }
-    if (action_event.action_id ==
-        ActionID(std::string_view("LookHorizontal"))) {
-      look_rotation.yaw += -action_event.axis_value;
-    }
-    if (action_event.action_id == ActionID(std::string_view("TrapCursor"))) {
-      trap_cursor = action_event.key_state == KeyState::Held;
-    }
-  }
-  camera.Move(move_direction * move_speed);
-  if (trap_cursor) {
-    engine.SetCursorTrapped(true);
-    look_rotation *= look_speed;
-    camera.Rotate(look_rotation);
-  } else {
-    engine.SetCursorTrapped(false);
-  }
 }
 
 } // namespace lumina::core

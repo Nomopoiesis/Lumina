@@ -6,21 +6,21 @@ namespace {
 
 // Returns the ANSI SGR sequence for the given log level, or an empty string
 // when the default console color should be used.
-constexpr const char *GetAnsiCodeForLevel(LogLevel level) {
+constexpr auto GetAnsiCodeForLevel(LogLevel level) -> const char * {
   using lumina::common::logger::LogLevel;
 
   switch (level) {
-  case LogLevel::TRACE:
-  case LogLevel::DEBUG:
-    return "\x1b[90m"; // bright black / dim gray
-  case LogLevel::INFO:
-    return ""; // default color
-  case LogLevel::WARNING:
-    return "\x1b[33m"; // yellow
-  case LogLevel::ERROR:
-    return "\x1b[31m"; // red
-  case LogLevel::CRITICAL:
-    return "\x1b[91;1m"; // bright red, bold
+    case LogLevel::TRACE:
+    case LogLevel::DEBUG:
+      return "\x1b[90m"; // bright black / dim gray
+    case LogLevel::INFO:
+      return ""; // default color
+    case LogLevel::WARNING:
+      return "\x1b[33m"; // yellow
+    case LogLevel::ERROR:
+      return "\x1b[31m"; // red
+    case LogLevel::CRITICAL:
+      return "\x1b[91;1m"; // bright red, bold
   }
 
   return "";
@@ -65,9 +65,9 @@ auto ConsoleTarget::Write(LogLevel level, const std::string &message) -> void {
   constexpr const char *kAnsiReset = "\x1b[0m";
 
   std::string colored_message;
-  colored_message.reserve(
-      std::char_traits<char>::length(ansi_prefix) + message.length() +
-      std::char_traits<char>::length(kAnsiReset));
+  colored_message.reserve(std::char_traits<char>::length(ansi_prefix) +
+                          message.length() +
+                          std::char_traits<char>::length(kAnsiReset));
 
   colored_message.append(ansi_prefix);
   colored_message.append(message);
