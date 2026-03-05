@@ -141,10 +141,10 @@ public:
   }
 
   [[nodiscard]] auto Det() const -> ScalarType {
-    Mat3 m11{rows[1].yzw, rows[2].yzw, rows[3].yzw};
-    Mat3 m12{rows[1].xzw, rows[2].xzw, rows[3].xzw};
-    Mat3 m13{rows[1].xyw, rows[2].xyw, rows[3].xyw};
-    Mat3 m14{rows[1].xyz, rows[2].xyz, rows[3].xyz};
+    Mat3 m11{rows[1].yzw(), rows[2].yzw(), rows[3].yzw()};
+    Mat3 m12{rows[1].xzw(), rows[2].xzw(), rows[3].xzw()};
+    Mat3 m13{rows[1].xyw(), rows[2].xyw(), rows[3].xyw()};
+    Mat3 m14{rows[1].xyz(), rows[2].xyz(), rows[3].xyz()};
 
     return (rows[0].x * m11.Det()) - (rows[0].y * m12.Det()) +
            (rows[0].z * m13.Det()) - (rows[0].w * m14.Det());
