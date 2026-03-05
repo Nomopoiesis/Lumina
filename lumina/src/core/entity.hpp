@@ -7,15 +7,17 @@
 
 namespace lumina::core {
 
+using EntityIndexType = u32;
+
 struct EntityID {
-  u32 index = 0;
+  EntityIndexType index = 0;
   u32 generation = 0;
 
   auto operator==(const EntityID &) const -> bool = default;
 };
 
 constexpr EntityID INVALID_ENTITY_ID = {
-    .index = std::numeric_limits<u32>::max(),
+    .index = std::numeric_limits<EntityIndexType>::max(),
     .generation = std::numeric_limits<u32>::max()};
 
 class Entity {

@@ -10,8 +10,8 @@ class LuminaEngine;
 
 class CameraMovementController : public IInputHandler {
 public:
-  CameraMovementController(EntityID camera_entity_id) noexcept
-      : camera_entity_id(camera_entity_id) {}
+  CameraMovementController(EntityID camera_entity_id_) noexcept
+      : camera_entity_id(camera_entity_id_) {}
   auto HandleInput(const std::span<const ActionEvent> &action_events)
       -> void override;
 

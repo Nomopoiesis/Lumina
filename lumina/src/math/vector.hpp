@@ -1,6 +1,8 @@
 #pragma once
 
+#include "lumina_assert.hpp"
 #include "lumina_types.hpp"
+
 
 #include <cmath>
 
@@ -23,7 +25,8 @@ public:
  */
 class Vec2 : public VectorBase {
   using VectorBase::VectorBase;
-  template <int x, int y> struct Vec2SwizzleWrapper {
+  template <int x, int y>
+  struct Vec2SwizzleWrapper {
     // implicit conversion to Vec2
     operator Vec2() const { return Vec2(arr[x], arr[y]); }
     // support assignments from Vec2
@@ -84,8 +87,13 @@ public:
     return result;
   }
 
-  auto operator[](size_t idx) -> ScalarType & { return e[idx]; }
+  auto operator[](size_t idx) -> ScalarType & {
+    ASSERT(idx < 2, "Vec2 index out of range");
+    return e[idx];
+  }
+
   [[nodiscard]] auto operator[](size_t idx) const -> const ScalarType & {
+    ASSERT(idx < 2, "Vec2 index out of range");
     return e[idx];
   }
 
@@ -110,7 +118,8 @@ public:
  *
  */
 class Vec3 : public VectorBase {
-  template <int x, int y> struct Vec2SwizzleWrapper {
+  template <int x, int y>
+  struct Vec2SwizzleWrapper {
     // implicit conversion to Vec2
     operator Vec2() const { return {arr[x], arr[y]}; }
     // support assignments from Vec2
@@ -124,7 +133,8 @@ class Vec3 : public VectorBase {
     ScalarType arr[3];
   };
 
-  template <int x, int y, int z> struct Vec3SwizzleWrapper {
+  template <int x, int y, int z>
+  struct Vec3SwizzleWrapper {
     // implicit conversion to Vec3
     operator Vec3() const { return Vec3(arr[x], arr[y], arr[z]); }
     // support assignments from Vec3
@@ -228,8 +238,13 @@ public:
     return result;
   }
 
-  auto operator[](size_t idx) -> ScalarType & { return e[idx]; }
+  auto operator[](size_t idx) -> ScalarType & {
+    ASSERT(idx < 3, "Vec3 index out of range");
+    return e[idx];
+  }
+
   [[nodiscard]] auto operator[](size_t idx) const -> const ScalarType & {
+    ASSERT(idx < 3, "Vec3 index out of range");
     return e[idx];
   }
 
@@ -251,7 +266,8 @@ public:
 
 class Vec4 : public VectorBase {
 private:
-  template <int x, int y> struct Vec2SwizzleWrapper {
+  template <int x, int y>
+  struct Vec2SwizzleWrapper {
     // implicit conversion to Vec2
     operator Vec2() const { return Vec2(arr[x], arr[y]); }
     // support assignments from Vec2
@@ -265,7 +281,8 @@ private:
     ScalarType arr[4];
   };
 
-  template <int x, int y, int z> struct Vec3SwizzleWrapper {
+  template <int x, int y, int z>
+  struct Vec3SwizzleWrapper {
     // implicit conversion to Vec3
     operator Vec3() const { return Vec3(arr[x], arr[y], arr[z]); }
     // support assignments from Vec3
@@ -280,7 +297,8 @@ private:
     ScalarType arr[4];
   };
 
-  template <int x, int y, int z, int w> struct Vec4SwizzleWrapper {
+  template <int x, int y, int z, int w>
+  struct Vec4SwizzleWrapper {
     // implicit conversion to Vec4
     operator Vec4() const { return Vec4(arr[x], arr[y], arr[z], arr[w]); }
     // support assignments from Vec4
@@ -435,8 +453,13 @@ public:
     return result;
   }
 
-  auto operator[](size_t idx) -> ScalarType & { return e[idx]; }
+  auto operator[](size_t idx) -> ScalarType & {
+    ASSERT(idx < 4, "Vec4 index out of range");
+    return e[idx];
+  }
+
   [[nodiscard]] auto operator[](size_t idx) const -> const ScalarType & {
+    ASSERT(idx < 4, "Vec4 index out of range");
     return e[idx];
   }
 
@@ -460,12 +483,14 @@ public:
 template <typename T>
 concept VectorType = requires(T vec) { std::is_base_of_v<VectorBase, T>; };
 
-template <VectorType T> auto Normalize(const T &&vec) -> T {
+template <VectorType T>
+auto Normalize(const T &&vec) -> T {
   T result = vec;
   return result.Normalize();
 }
 
-template <VectorType T> auto Length(const T &&vec) -> typename T::ScalarType {
+template <VectorType T>
+auto Length(const T &&vec) -> typename T::ScalarType {
   return vec.Length();
 }
 

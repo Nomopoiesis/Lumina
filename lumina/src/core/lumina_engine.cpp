@@ -4,7 +4,9 @@
 
 #include "common/logger/logger.hpp"
 
+#include "basic_geometry.hpp"
 #include "components/camera.hpp"
+#include "components/static_mesh_component.hpp"
 #include "components/transform.hpp"
 #include "input/input_action.hpp"
 
@@ -17,7 +19,7 @@ struct FibData {
   u64 *result;
 };
 
-void FibJob(void *parameter) {
+static void FibJob(void *parameter) {
   auto *data = static_cast<FibData *>(parameter);
 
   if (data->n <= 1) {
@@ -145,6 +147,12 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   world.SetActiveCamera(entity_id);
   instance.camera_movement_controller->SetControlledEntity(entity_id);
 
+  auto static_mesh_handle = instance.static_mesh_manager.Create();
+  instance.static_mesh_manager.Set(static_mesh_handle, BasicGeometry::Quad());
+
+  entity_id = world.CreateEntity();
+  world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
+
   instance.is_initialized = true;
 }
 
@@ -159,7 +167,7 @@ auto LuminaEngine::Shutdown() -> void {
 
 auto LuminaEngine::ExecuteFrame(f64 delta_time) -> void {
   // Clamp the delta time to 0.1 seconds to prevent large jumps in time
-  delta_time = std::clamp<f64>(delta_time, 0.0, 0.1F);
+  delta_time = std::clamp<f64>(delta_time, 0.0, 0.1);
   frame_time_info.delta_time = delta_time;
   frame_time_info.total_time += delta_time;
   input_dispatcher.Dispatch(input_state);

@@ -24,7 +24,7 @@ struct CameraSettings {
 class Camera {
 public:
   Camera() noexcept = default;
-  Camera(const CameraSettings &settings) noexcept : settings(settings) {}
+  Camera(const CameraSettings &settings_) noexcept : settings(settings_) {}
   ~Camera() noexcept = default;
 
   Camera(const Camera &) = default;

@@ -29,8 +29,8 @@ private:
   };
 
   GenerationalEntry entities[1024];
-  std::vector<size_t> free_indices;
-  size_t next_index = 0;
+  std::vector<EntityIndexType> free_indices;
+  EntityIndexType next_index = 0;
 };
 
 } // namespace lumina::core
