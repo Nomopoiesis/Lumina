@@ -6,9 +6,6 @@
 #include "core/lumina_engine.hpp"
 #include "shaders/shader_module_cache.hpp"
 
-#include "core/components/camera.hpp"
-#include "core/components/transform.hpp"
-#include "math/matrix.hpp"
 #include "math/vector.hpp"
 #include <vulkan/vk_enum_string_helper.h>
 
@@ -25,12 +22,6 @@
 #undef STB_IMAGE_IMPLEMENTATION
 
 namespace lumina::renderer {
-
-struct UniformBufferObject {
-  alignas(16) math::Mat4 model;
-  alignas(16) math::Mat4 view;
-  alignas(16) math::Mat4 proj;
-};
 
 struct Vertex {
   math::Vec3 position;
@@ -537,7 +528,7 @@ CreateDescriptorSets(VulkanContext &vulkan_context,
     VkDescriptorBufferInfo buffer_info = {
         .buffer = uniform_buffers[i],
         .offset = 0,
-        .range = sizeof(UniformBufferObject),
+        .range = sizeof(core::UniformBufferObject),
     };
     VkDescriptorImageInfo image_info = {
         .sampler = texture_sampler,
@@ -580,7 +571,7 @@ CreateDescriptorSets(VulkanContext &vulkan_context,
 static auto CreateUniformBuffer(VulkanContext &vulkan_context,
                                 VkDeviceMemory &memory, VkBuffer &buffer,
                                 void *&mapped_data) -> bool {
-  VkDeviceSize size = sizeof(UniformBufferObject);
+  VkDeviceSize size = sizeof(core::UniformBufferObject);
   if (!CreateBuffer(vulkan_context, size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
@@ -591,21 +582,6 @@ static auto CreateUniformBuffer(VulkanContext &vulkan_context,
   }
 
   vkMapMemory(vulkan_context.GetDevice(), memory, 0, size, 0, &mapped_data);
-  return true;
-}
-
-static auto UpdateUniformBuffer(VulkanContext &vulkan_context, VkBuffer &buffer,
-                                void *&mapped_data) -> bool {
-  auto &world = core::LuminaEngine::Instance().GetCurrentWorld();
-  auto camera_id = world.GetActiveCamera();
-  auto transform = world.GetComponent<core::components::Transform>(camera_id);
-  auto camera = world.GetComponent<core::components::Camera>(camera_id);
-  UniformBufferObject ubo = {};
-  ubo.model = math::Mat4::Identity();
-  ubo.view = CalculateViewMatrix(transform);
-  ubo.proj = camera.ToProjectionMatrix();
-  ubo.proj[1][1] *= -1;
-  memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
 }
 
@@ -830,19 +806,6 @@ LuminaRenderer::~LuminaRenderer() noexcept {
                                  descriptor_set_layout, nullptr);
   }
 
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    if (uniform_buffers_mapped[i] != nullptr) {
-      vkUnmapMemory(vulkan_context.GetDevice(), uniform_buffers_memory[i]);
-    }
-    if (uniform_buffers[i] != VK_NULL_HANDLE) {
-      vkDestroyBuffer(vulkan_context.GetDevice(), uniform_buffers[i], nullptr);
-    }
-    if (uniform_buffers_memory[i] != VK_NULL_HANDLE) {
-      vkFreeMemory(vulkan_context.GetDevice(), uniform_buffers_memory[i],
-                   nullptr);
-    }
-  }
-
   if (vertex_buffer != VK_NULL_HANDLE) {
     vkDestroyBuffer(vulkan_context.GetDevice(), vertex_buffer, nullptr);
   }
@@ -868,6 +831,96 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   if (pipeline_layout != VK_NULL_HANDLE) {
     vkDestroyPipelineLayout(vulkan_context.GetDevice(), pipeline_layout,
                             nullptr);
+  }
+}
+
+auto LuminaRenderer::AcquireFrameContextForUpdate() -> void {
+  frames_available_for_update.acquire();
+  for (auto &frame_context : frame_contexts) {
+    FrameContextPipelineState expected = FrameContextPipelineState::IDLE;
+    if (frame_context.pipeline_state.compare_exchange_weak(
+            expected, FrameContextPipelineState::UPDATE)) {
+      frame_context_for_update = &frame_context;
+      break;
+    }
+  }
+}
+
+auto LuminaRenderer::ReleaseFrameContextForUpdate() -> void {
+  ASSERT(frame_context_for_update, "No frame context for update");
+  frame_context_for_update->pipeline_state.store(
+      FrameContextPipelineState::UPDATE_COMPLETE);
+  frame_context_for_update = nullptr;
+  // signal that the frame context is available for render
+  frames_available_for_render.release();
+}
+
+auto LuminaRenderer::AcquireFrameContextForRender() -> void {
+  frames_available_for_render.acquire();
+  for (auto &frame_context : frame_contexts) {
+    FrameContextPipelineState expected =
+        FrameContextPipelineState::UPDATE_COMPLETE;
+    if (frame_context.pipeline_state.compare_exchange_weak(
+            expected, FrameContextPipelineState::RENDER)) {
+      frame_context_for_render = &frame_context;
+      break;
+    }
+  }
+}
+
+auto LuminaRenderer::ReleaseFrameContextForRender() -> void {
+  ASSERT(frame_context_for_render, "No frame context for render");
+  frame_context_for_render->pipeline_state.store(
+      FrameContextPipelineState::RENDER_COMPLETE);
+  frame_context_for_render = nullptr;
+  // We do not signal that a frame context is available for update, as it may
+  // not yet be done rendering on the GPU (due to it being async), instead we
+  // will signal the availability when a frame context is reclaimed
+}
+
+auto LuminaRenderer::TryReclaimFrameContexts() -> void {
+  // First check fence status of all RENDER_COMPLETE frame contexts
+  auto pending_completion = 0;
+  for (auto &frame_context : frame_contexts) {
+    if (frame_context.pipeline_state.load() ==
+        FrameContextPipelineState::RENDER_COMPLETE) {
+      auto status = vkGetFenceStatus(vulkan_context.GetDevice(),
+                                     frame_context.GetFrameBeginReadyFence());
+      if (status == VK_SUCCESS) {
+        // The fence is signaled, so the frame context is ready to be reused
+        frame_context.pipeline_state.store(FrameContextPipelineState::IDLE);
+        frames_available_for_update.release();
+        return;
+      } else {
+        ++pending_completion;
+      }
+    }
+  }
+
+  // Check if all available frame contexts are pendign completion, if so we need
+  // to wait for at least one of them so that we can reclaim it and make it
+  // available for update, we want to wait for the previous context as it is
+  // most likely to be signaled first
+  if (pending_completion == frame_contexts.size()) {
+    auto ctx_idx = (current_frame_index - 1) % MAX_FRAMES_IN_FLIGHT;
+    ASSERT(ctx_idx < frame_contexts.size(), "Context index out of bounds");
+    vkWaitForFences(vulkan_context.GetDevice(), 1,
+                    &frame_contexts[ctx_idx].GetFrameBeginReadyFence(), VK_TRUE,
+                    UINT64_MAX);
+    frame_contexts[ctx_idx].pipeline_state.store(
+        FrameContextPipelineState::IDLE);
+    frames_available_for_update.release();
+  }
+}
+
+auto LuminaRenderer::RenderThread() -> void {
+  platform::common::PlatformServices::Instance().LuminaSetThreadName(
+      "LuminaRendererThread");
+  while (!shutdown_requested) {
+    AcquireFrameContextForRender();
+    DrawFrame();
+    ReleaseFrameContextForRender();
+    TryReclaimFrameContexts();
   }
 }
 
@@ -930,22 +983,6 @@ auto LuminaRenderer::Initialize() -> void {
   texture_sampler = texture_sampler_result.value();
 
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    auto uniform_buffer_result =
-        CreateUniformBuffer(vulkan_context, uniform_buffers_memory[i],
-                            uniform_buffers[i], uniform_buffers_mapped[i]);
-    ASSERT(uniform_buffer_result, "Failed to create uniform buffer");
-  }
-
-  auto desc_pool_result = CreateDescriptorPool(vulkan_context, descriptor_pool,
-                                               MAX_FRAMES_IN_FLIGHT);
-  ASSERT(desc_pool_result, "Failed to create descriptor pool");
-  auto desc_sets_result = CreateDescriptorSets(
-      vulkan_context, descriptor_pool, MAX_FRAMES_IN_FLIGHT,
-      uniform_buffers.data(), texture_sampler, texture_image_view,
-      descriptor_set_layout, descriptor_sets);
-  ASSERT(desc_sets_result, "Failed to create descriptor sets");
-
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
     auto frame_context_result =
         FrameContext::Create(vulkan_context, command_pool);
     if (!frame_context_result) {
@@ -954,7 +991,32 @@ auto LuminaRenderer::Initialize() -> void {
       LUMINA_TERMINATE();
     }
     frame_contexts.push_back(std::move(frame_context_result.value()));
+    auto &uniform_buffer = frame_contexts[i].GetUniformBuffer();
+    auto uniform_buffer_result =
+        CreateUniformBuffer(vulkan_context, uniform_buffer.memory,
+                            uniform_buffer.buffer, uniform_buffer.mapped);
+    ASSERT(uniform_buffer_result, "Failed to create uniform buffer");
   }
+
+  auto desc_pool_result = CreateDescriptorPool(vulkan_context, descriptor_pool,
+                                               MAX_FRAMES_IN_FLIGHT);
+  ASSERT(desc_pool_result, "Failed to create descriptor pool");
+  std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    uniform_buffers[i] = frame_contexts[i].GetUniformBuffer().buffer;
+  }
+  auto desc_sets_result = CreateDescriptorSets(
+      vulkan_context, descriptor_pool, MAX_FRAMES_IN_FLIGHT,
+      uniform_buffers.data(), texture_sampler, texture_image_view,
+      descriptor_set_layout, descriptor_sets);
+  ASSERT(desc_sets_result, "Failed to create descriptor sets");
+
+  render_thread = std::thread(&LuminaRenderer::RenderThread, this);
+}
+
+auto LuminaRenderer::Shutdown() -> void {
+  shutdown_requested = true;
+  render_thread.join();
 }
 
 auto LuminaRenderer::DeviceWaitIdle() -> void {
@@ -962,12 +1024,10 @@ auto LuminaRenderer::DeviceWaitIdle() -> void {
 }
 
 auto LuminaRenderer::DrawFrame() -> void {
-  auto &frame_context = frame_contexts[current_frame_index];
-  // wait for the fence to be signaled - thus waiting for the previous frame
-  // to be finished
-  vkWaitForFences(vulkan_context.GetDevice(), 1,
-                  &frame_context.GetFrameBeginReadyFence(), VK_TRUE,
-                  UINT64_MAX);
+  auto &frame_context = *frame_context_for_render;
+
+  vkResetFences(vulkan_context.GetDevice(), 1,
+                &frame_context.GetFrameBeginReadyFence());
 
   u32 image_index = 0;
   VkResult result = vkAcquireNextImageKHR(
@@ -985,12 +1045,6 @@ auto LuminaRenderer::DrawFrame() -> void {
     LOG_CRITICAL("Failed to acquire next image: {}", string_VkResult(result));
     LUMINA_TERMINATE();
   }
-
-  UpdateUniformBuffer(vulkan_context, uniform_buffers[current_frame_index],
-                      uniform_buffers_mapped[current_frame_index]);
-
-  vkResetFences(vulkan_context.GetDevice(), 1,
-                &frame_context.GetFrameBeginReadyFence());
 
   if (vkResetCommandBuffer(frame_context.GetCommandBuffer(), 0) != VK_SUCCESS) {
     LOG_CRITICAL("Failed to reset command buffer");

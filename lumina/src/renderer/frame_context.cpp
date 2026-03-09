@@ -8,7 +8,9 @@ FrameContext::FrameContext(FrameContext &&other) noexcept
       frame_begin_semaphore(
           std::exchange(other.frame_begin_semaphore, VK_NULL_HANDLE)),
       frame_begin_ready_fence(
-          std::exchange(other.frame_begin_ready_fence, VK_NULL_HANDLE)) {}
+          std::exchange(other.frame_begin_ready_fence, VK_NULL_HANDLE)),
+      uniform_buffer(
+          std::exchange(other.uniform_buffer, FrameContextUniformBuffer{})) {}
 
 auto FrameContext::operator=(FrameContext &&other) noexcept -> FrameContext & {
   if (this != &other) {
@@ -18,6 +20,8 @@ auto FrameContext::operator=(FrameContext &&other) noexcept -> FrameContext & {
         std::exchange(other.frame_begin_semaphore, VK_NULL_HANDLE);
     frame_begin_ready_fence =
         std::exchange(other.frame_begin_ready_fence, VK_NULL_HANDLE);
+    uniform_buffer =
+        std::exchange(other.uniform_buffer, FrameContextUniformBuffer{});
   }
   return *this;
 }
@@ -30,6 +34,16 @@ FrameContext::~FrameContext() noexcept {
   if (frame_begin_ready_fence != VK_NULL_HANDLE) {
     vkDestroyFence(vulkan_context.GetDevice(), frame_begin_ready_fence,
                    nullptr);
+  }
+
+  if (uniform_buffer.mapped != nullptr) {
+    vkUnmapMemory(vulkan_context.GetDevice(), uniform_buffer.memory);
+  }
+  if (uniform_buffer.buffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(vulkan_context.GetDevice(), uniform_buffer.buffer, nullptr);
+  }
+  if (uniform_buffer.memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), uniform_buffer.memory, nullptr);
   }
 }
 
