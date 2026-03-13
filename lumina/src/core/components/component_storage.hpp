@@ -23,6 +23,9 @@ public:
   auto Get(EntityID id) -> T;
   auto Set(EntityID id, const T &component) -> void;
 
+  template <typename Func>
+  auto ForEach(Func &&func) -> void;
+
 private:
   std::unordered_map<EntityID, T> data_;
 };
@@ -44,6 +47,14 @@ auto ComponentStorage<T>::Get(EntityID id) -> T {
 template <typename T>
 auto ComponentStorage<T>::Set(EntityID id, const T &component) -> void {
   data_[id] = component;
+}
+
+template <typename T>
+template <typename Func>
+auto ComponentStorage<T>::ForEach(Func &&func) -> void {
+  for (auto &[id, component] : data_) {
+    std::forward<Func>(func)(id, component);
+  }
 }
 
 } // namespace lumina::core::components

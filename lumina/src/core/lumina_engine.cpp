@@ -19,7 +19,6 @@ static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
   auto transform = world.GetComponent<core::components::Transform>(camera_id);
   auto camera = world.GetComponent<core::components::Camera>(camera_id);
   UniformBufferObject ubo = {};
-  ubo.model = math::Mat4::Identity();
   ubo.view = CalculateViewMatrix(transform);
   ubo.proj = camera.ToProjectionMatrix();
   ubo.proj[1][1] *= -1;
@@ -81,7 +80,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       .aspect_ratio = static_cast<f32>(init_info.window_dimensions.width) /
                       static_cast<f32>(init_info.window_dimensions.height),
       .near_plane = 0.1F,
-      .far_plane = 10.0F,
+      .far_plane = 100.0F,
   };
   world.AddComponent<Camera>(entity_id, camera_settings);
 
@@ -92,9 +91,16 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   instance.static_mesh_manager.Set(static_mesh_handle, BasicGeometry::Quad());
 
   entity_id = world.CreateEntity();
+  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, 0.0F},
+                                math::Vec3{0.0F, 0.0F, 0.0F},
+                                math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
-  instance.tmp_entity_id = entity_id;
+  entity_id = world.CreateEntity();
+  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -1.0F},
+                                math::Vec3{0.0F, 0.0F, 0.0F},
+                                math::Vec3{1.0F, 1.0F, 1.0F});
+  world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
   instance.is_initialized = true;
 }
@@ -123,27 +129,32 @@ auto LuminaEngine::EndFrame() -> void {
 }
 
 auto LuminaEngine::ExecuteFrame() -> void {
-  static bool init = true;
-  if (init) {
-    auto *job = job_manager->AcquireJob();
-    auto static_mesh_handle =
-        current_world->GetComponent<StaticMeshComponent>(tmp_entity_id)
-            .GetStaticMeshHandle();
-    job->execute = [static_mesh_handle](void *data) -> void {
-      auto *engine = static_cast<LuminaEngine *>(data);
-      auto mesh = engine->static_mesh_manager.Get(static_mesh_handle);
-      ASSERT(mesh.has_value(), "Static mesh not found");
-      auto &renderer = engine->GetRenderer();
-      auto render_mesh_handle = renderer.CreateRenderMesh(mesh.value());
-      mesh.value().render_mesh_handle = render_mesh_handle;
-      engine->static_mesh_manager.Set(static_mesh_handle,
-                                      std::move(mesh.value()));
-    };
-    job->data = this;
-    job_manager->SubmitJob(job);
-    init = false;
-  }
-  auto *frame_sync_counter = job_manager->AllocateCounter(1);
+  // Dispatch upload jobs for any meshes not yet uploaded to the GPU
+  current_world->ForEachComponent<StaticMeshComponent>(
+      [this](EntityID /*id*/, const StaticMeshComponent &component) {
+        auto static_mesh_handle = component.GetStaticMeshHandle();
+        auto mesh = static_mesh_manager.Get(static_mesh_handle);
+        if (!mesh.has_value()) {
+          return;
+        }
+        if (mesh->render_mesh_handle.index != INVALID_RESOURCE_HANDLE_INDEX) {
+          return;
+        }
+        auto *job = job_manager->AcquireJob();
+        job->execute = [static_mesh_handle](void *data) -> void {
+          auto *engine = static_cast<LuminaEngine *>(data);
+          auto m = engine->static_mesh_manager.Get(static_mesh_handle);
+          ASSERT(m.has_value(), "Static mesh not found");
+          auto render_mesh_handle =
+              engine->GetRenderer().CreateRenderMesh(m.value());
+          m->render_mesh_handle = render_mesh_handle;
+          engine->static_mesh_manager.Set(static_mesh_handle, std::move(*m));
+        };
+        job->data = this;
+        job_manager->SubmitJob(job);
+      });
+
+  auto *frame_sync_counter = job_manager->AllocateCounter(2);
   auto *job = job_manager->AcquireJob();
   job->execute = [](void *data) {
     auto *engine = static_cast<LuminaEngine *>(data);
@@ -154,13 +165,34 @@ auto LuminaEngine::ExecuteFrame() -> void {
   job->data = this;
   job->signal_counter = frame_sync_counter;
   job_manager->SubmitJob(job);
-  auto static_mesh_component =
-      current_world->GetComponent<StaticMeshComponent>(tmp_entity_id);
-  auto static_mesh_handle = static_mesh_component.GetStaticMeshHandle();
-  auto static_mesh = static_mesh_manager.Get(static_mesh_handle);
-  ASSERT(static_mesh.has_value(), "Static mesh not found");
-  renderer->GetFrameContextForUpdate()->render_mesh_handle =
-      static_mesh->render_mesh_handle;
+
+  job = job_manager->AcquireJob();
+  job->execute = [](void *data) {
+    // Build draw list from all StaticMeshComponents with uploaded meshes
+    auto *engine = static_cast<LuminaEngine *>(data);
+    auto *frame_context = engine->renderer->GetFrameContextForUpdate();
+    frame_context->render_draw_list.clear();
+    engine->current_world->ForEachComponent<StaticMeshComponent>(
+        [engine, frame_context](EntityID id,
+                                const StaticMeshComponent &component) -> void {
+          auto mesh =
+              engine->static_mesh_manager.Get(component.GetStaticMeshHandle());
+          auto transform = engine->current_world->GetComponent<Transform>(id);
+          if (!mesh.has_value()) {
+            return;
+          }
+          if (mesh->render_mesh_handle.index == INVALID_RESOURCE_HANDLE_INDEX) {
+            return;
+          }
+          frame_context->render_draw_list.push_back(
+              {.render_mesh_handle = mesh->render_mesh_handle,
+               .model = transform.GetModelMatrix()});
+        });
+  };
+  job->data = this;
+  job->signal_counter = frame_sync_counter;
+  job_manager->SubmitJob(job);
+
   input_dispatcher.Dispatch(input_state);
   job_manager->WaitForCounter(frame_sync_counter);
   job_manager->ReleaseCounter(frame_sync_counter);

@@ -29,6 +29,8 @@ public:
   auto Rotate(const math::Vec3 &delta) -> void;
   auto Scale(const math::Vec3 &delta) -> void;
 
+  [[nodiscard]] auto GetModelMatrix() const -> math::Mat4;
+
   math::Vec3 position;             // Position in world space (in centimeters)
   math::Vec3 rotation;             // Euler angles in degrees
   math::Vec3 scale{math::Vec3(1)}; // Scale in local space (1.0f is 100%)
@@ -62,6 +64,13 @@ inline auto Transform::Rotate(const math::Vec3 &delta) -> void {
 
 inline auto Transform::Scale(const math::Vec3 &delta) -> void {
   scale += delta;
+}
+
+inline auto Transform::GetModelMatrix() const -> math::Mat4 {
+  auto translation_mat = math::TranslationMatrix(position);
+  auto rotation_mat = math::RotationMatrix(rotation);
+  auto scale_mat = math::ScaleMatrix(scale);
+  return math::Dot(math::Dot(scale_mat, rotation_mat), translation_mat);
 }
 
 inline auto CalculateViewMatrix(const Transform &transform) -> math::Mat4 {

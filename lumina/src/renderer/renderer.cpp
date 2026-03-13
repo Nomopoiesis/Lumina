@@ -1185,14 +1185,20 @@ auto LuminaRenderer::DrawFrame() -> void {
 
 auto LuminaRenderer::CreatePipelineLayout()
     -> std::expected<void, VkInitializationError> {
+  VkPushConstantRange range = {
+      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+      .offset = 0,
+      .size = sizeof(math::Mat4),
+  };
+
   VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
       .pNext = nullptr,
       .flags = 0,
       .setLayoutCount = 1,
       .pSetLayouts = &descriptor_set_layout,
-      .pushConstantRangeCount = 0,
-      .pPushConstantRanges = nullptr,
+      .pushConstantRangeCount = 1,
+      .pPushConstantRanges = &range,
   };
 
   if (vkCreatePipelineLayout(vulkan_context.GetDevice(),
@@ -1523,17 +1529,24 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipeline_layout, 0, 1,
                           &descriptor_sets[current_frame_index], 0, nullptr);
-  auto render_mesh_opt =
-      render_mesh_manager.Get(frame_context.render_mesh_handle);
-  if (render_mesh_opt.has_value() && render_mesh_opt.value().ready) {
+  for (const auto &draw_mesh_info : frame_context.render_draw_list) {
+    auto handle = draw_mesh_info.render_mesh_handle;
+    auto model = draw_mesh_info.model;
+    auto render_mesh_opt = render_mesh_manager.Get(handle);
+    if (!render_mesh_opt.has_value() || !render_mesh_opt.value().ready) {
+      continue;
+    }
     const auto &render_mesh = render_mesh_opt.value();
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(command_buffer, 0, 1,
                            &render_mesh.vertex_streams[0].buffer, offsets);
     vkCmdBindIndexBuffer(command_buffer, render_mesh.index_buffer, 0,
                          VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(command_buffer,
-                     static_cast<u32>(render_mesh.index_count), 1, 0, 0, 0);
+    vkCmdPushConstants(command_buffer, pipeline_layout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
+                       &model);
+    vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh.index_count),
+                     1, 0, 0, 0);
   }
 
   vkCmdEndRendering(command_buffer);
