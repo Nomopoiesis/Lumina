@@ -42,10 +42,11 @@ public:
   auto Initialize() noexcept -> std::expected<void, VkInitializationError>;
   auto ResetContext() noexcept -> void;
 
-  auto CreateSemaphore() const noexcept
+  [[nodiscard]] auto CreateSemaphore() const noexcept
       -> std::expected<VkSemaphore, VkInitializationError>;
-  auto CreateFence(bool signaled = false) const noexcept
+  [[nodiscard]] auto CreateFence(bool signaled = false) const noexcept
       -> std::expected<VkFence, VkInitializationError>;
+  auto DestroyFence(VkFence &fence) const noexcept -> void;
 
   [[nodiscard]] auto GetDevice() const noexcept -> const VkDevice &;
   [[nodiscard]] auto GetPhysicalDevice() const noexcept

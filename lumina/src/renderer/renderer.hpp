@@ -2,14 +2,27 @@
 
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
+#include "command_context.hpp"
 #include "frame_context.hpp"
 #include "vulkan_context.hpp"
+
+#include "core/static_mesh.hpp"
+#include "render_mesh.hpp"
+
+#include "common/data_structures/lock_free_concurrent_queue.hpp"
+#include "common/data_structures/lock_free_object_pool.hpp"
 
 #include <semaphore>
 #include <thread>
 #include <vector>
 
 namespace lumina::renderer {
+
+using CommandSubmissionQueue =
+    common::data_structures::LockFreeConcurrentQueue<CommandContext *>;
+
+using CommandContextPool =
+    common::data_structures::LockFreeObjectPool<CommandContext>;
 
 class LuminaRenderer {
 public:
@@ -31,6 +44,10 @@ public:
 
   auto DeviceWaitIdle() -> void;
 
+  auto GetVulkanContext() const noexcept -> const VulkanContext & {
+    return vulkan_context;
+  }
+
   auto SetFramebufferResized(bool resized) -> void {
     is_framebuffer_resized = resized;
   }
@@ -49,6 +66,11 @@ public:
     return frame_context_for_update;
   }
 
+  auto AcquireCommandContext() -> CommandContext &;
+
+  auto CreateRenderMesh(const core::StaticMesh &mesh) -> RenderMeshHandle;
+  auto DestroyRenderMesh(RenderMeshHandle handle) -> void;
+
 private:
   auto RenderThread() -> void;
 
@@ -56,6 +78,12 @@ private:
   auto ReleaseFrameContextForRender() -> void;
 
   auto TryReclaimFrameContexts() -> void;
+
+  auto ReleaseCommandContext(CommandContext &cmd_ctx) -> void;
+
+  auto SubmitCommandContext(CommandContext &cmd_ctx) -> void;
+
+  auto PollAndExecuteCommandContexts() -> void;
 
   auto CreatePipelineLayout() -> std::expected<void, VkInitializationError>;
   auto CreatePipeline() -> std::expected<void, VkInitializationError>;
@@ -90,12 +118,7 @@ private:
   FrameContext *frame_context_for_update = nullptr;
   FrameContext *frame_context_for_render = nullptr;
 
-  std::vector<FrameContext> frame_contexts;
-
-  VkDeviceMemory vertex_buffer_memory = VK_NULL_HANDLE;
-  VkBuffer vertex_buffer = VK_NULL_HANDLE;
-  VkDeviceMemory index_buffer_memory = VK_NULL_HANDLE;
-  VkBuffer index_buffer = VK_NULL_HANDLE;
+  std::vector<std::unique_ptr<FrameContext>> frame_contexts;
 
   VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
   VkImage texture_image = VK_NULL_HANDLE;
@@ -106,6 +129,13 @@ private:
   VkDeviceMemory depth_image_memory = VK_NULL_HANDLE;
   VkImage depth_image = VK_NULL_HANDLE;
   VkImageView depth_image_view = VK_NULL_HANDLE;
+
+  CommandContextPool command_context_pool;
+  CommandSubmissionQueue global_submission_queue{256};
+  std::vector<std::pair<VkFence, std::vector<CommandContext *>>>
+      pending_submissions;
+
+  RenderMeshManager render_mesh_manager;
 };
 
 } // namespace lumina::renderer

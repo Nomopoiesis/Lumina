@@ -124,6 +124,7 @@ auto JobManager::FiberEntryPoint(void *data) -> void {
     if (fiber_context->current_job->signal_counter != nullptr) {
       GetCurrent()->Signal(fiber_context->current_job->signal_counter);
     }
+    GetCurrent()->ReleaseJob(fiber_context->current_job);
     fiber_context->is_completed.store(true, std::memory_order_release);
     fiber_context->current_job = nullptr;
     YieldToMasterFiber();
@@ -173,7 +174,7 @@ auto JobManager::ReleaseCounter(Counter *counter) -> void {
   counter_pool.Release(counter);
 }
 
-auto JobManager::AllocateJob() -> Job * {
+auto JobManager::AcquireJob() -> Job * {
   auto *job = job_pool.Acquire();
   allocated_job_count.fetch_add(1, std::memory_order_relaxed);
   return job;

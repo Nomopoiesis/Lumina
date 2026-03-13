@@ -14,7 +14,6 @@
 #include "input/input_state.hpp"
 #include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
-#include "resource_manager.hpp"
 #include "static_mesh.hpp"
 #include "world.hpp"
 
@@ -101,6 +100,10 @@ public:
     return static_cast<f32>(frame_time_info.total_time);
   }
 
+  [[nodiscard]] auto GetRenderer() -> renderer::LuminaRenderer & {
+    return *renderer;
+  }
+
   auto GetInputState() -> InputState & { return input_state; }
   [[nodiscard]] auto GetInputState() const -> const InputState & {
     return input_state;
@@ -114,6 +117,8 @@ public:
   auto ExecuteFrame() -> void;
   // Ends engine frame simulation and releases the frame for rendering
   auto EndFrame() -> void;
+
+  EntityID tmp_entity_id = INVALID_ENTITY_ID;
 
 private:
   LuminaEngine() noexcept = default;
@@ -141,7 +146,7 @@ private:
 
   std::unique_ptr<World> current_world;
 
-  ResourceManager<StaticMesh> static_mesh_manager;
+  StaticMeshManager static_mesh_manager;
 };
 
 } // namespace lumina::core

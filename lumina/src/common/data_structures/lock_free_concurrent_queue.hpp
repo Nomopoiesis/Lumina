@@ -5,20 +5,23 @@
 
 namespace lumina::common::data_structures {
 
-template <typename T> class LockFreeConcurrentQueue {
+template <typename T>
+class LockFreeConcurrentQueue {
 public:
   LockFreeConcurrentQueue(size_t capacity) noexcept;
   ~LockFreeConcurrentQueue() noexcept = default;
 
   LockFreeConcurrentQueue(const LockFreeConcurrentQueue &) = delete;
-  LockFreeConcurrentQueue(LockFreeConcurrentQueue &&) noexcept = delete;
+  LockFreeConcurrentQueue(LockFreeConcurrentQueue &&) noexcept = default;
   auto operator=(const LockFreeConcurrentQueue &)
       -> LockFreeConcurrentQueue & = delete;
   auto operator=(LockFreeConcurrentQueue &&) noexcept
-      -> LockFreeConcurrentQueue & = delete;
+      -> LockFreeConcurrentQueue & = default;
 
   auto Push(const T &value) -> bool;
   auto Pop(T &value) -> bool;
+
+  auto Size() const noexcept -> size_t;
 
 private:
   struct alignas(CACHE_LINE_SIZE) Slot {
@@ -67,7 +70,8 @@ auto LockFreeConcurrentQueue<T>::Push(const T &value) -> bool {
   return true;
 }
 
-template <typename T> auto LockFreeConcurrentQueue<T>::Pop(T &value) -> bool {
+template <typename T>
+auto LockFreeConcurrentQueue<T>::Pop(T &value) -> bool {
   Slot *slot = nullptr;
   auto pos = dequeue_index.load(std::memory_order_relaxed);
   for (;;) {
@@ -89,6 +93,12 @@ template <typename T> auto LockFreeConcurrentQueue<T>::Pop(T &value) -> bool {
   value = slot->value;
   slot->sequence_number.store(pos + buffer_mask + 1, std::memory_order_release);
   return true;
+}
+
+template <typename T>
+auto LockFreeConcurrentQueue<T>::Size() const noexcept -> size_t {
+  return enqueue_index.load(std::memory_order_relaxed) -
+         dequeue_index.load(std::memory_order_relaxed);
 }
 
 } // namespace lumina::common::data_structures

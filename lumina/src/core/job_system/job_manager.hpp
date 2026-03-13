@@ -103,8 +103,7 @@ public:
   auto AllocateCounter(u32 value) -> Counter *;
   auto ReleaseCounter(Counter *counter) -> void;
 
-  auto AllocateJob() -> Job *;
-  auto ReleaseJob(Job *job) -> void;
+  auto AcquireJob() -> Job *;
 
   auto SubmitJob(Job *job) -> void;
   auto WaitForCounter(Counter *counter) -> void;
@@ -127,6 +126,8 @@ private:
   static auto FiberEntryPoint(void *data) -> void;
   static auto WorkerLoop(WorkerContext *ctx) -> void;
   static auto YieldToMasterFiber() -> void;
+
+  auto ReleaseJob(Job *job) -> void;
 
   std::atomic<size_t> round_robin_index = 0;
   JobPool job_pool;

@@ -21,7 +21,8 @@ target_sources(
             logger/logger.hpp
             lumina_terminate.hpp
             data_structures/lock_free_pool.hpp
-            data_structures/work_stealing_deque.hpp)
+            data_structures/work_stealing_deque.hpp
+            data_structures/data_buffer.hpp)
 
 add_library(lumina_common_terminate STATIC)
 target_sources(lumina_common_terminate PRIVATE lumina_terminate.cpp)

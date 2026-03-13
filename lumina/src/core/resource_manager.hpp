@@ -2,6 +2,10 @@
 
 #include "lumina_types.hpp"
 
+#include "common/logger/logger.hpp"
+#include "common/lumina_assert.hpp"
+
+#include <algorithm>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -35,19 +39,39 @@ public:
 
   auto Create() -> ResourceHandle<T>;
   auto Destroy(ResourceHandle<T> handle) -> void;
+
+  // Destroy with a callback invoked with the resource before it is freed.
+  template <typename Func>
+  auto Destroy(ResourceHandle<T> handle, Func &&on_destroy) -> void;
+
+  // Destroy all active resources, invoking the callback for each.
+  template <typename Func>
+  auto DestroyAll(Func &&on_destroy) -> void;
+
   auto Get(ResourceHandle<T> handle) -> std::optional<T>;
   auto Set(ResourceHandle<T> handle, T &&resource) -> void;
 
+  template <typename Func>
+  auto ForEach(Func &&func) -> void;
+
 private:
   struct ResourceEntry {
-    u32 generation;
-    T resource;
+    u32 generation{};
+    T resource{};
   };
+
+  [[nodiscard]] auto IsActive(ResourceHandleIndexType index) const -> bool;
 
   ResourceEntry resources[1024];
   std::vector<ResourceHandleIndexType> free_indices;
   ResourceHandleIndexType next_index = 0;
 };
+
+template <typename T>
+auto ResourceManager<T>::IsActive(ResourceHandleIndexType index) const -> bool {
+  return std::ranges::none_of(free_indices,
+                              [index](auto i) -> bool { return i == index; });
+}
 
 template <typename T>
 auto ResourceManager<T>::Create() -> ResourceHandle<T> {
@@ -67,7 +91,7 @@ auto ResourceManager<T>::Destroy(ResourceHandle<T> handle) -> void {
              handle.index != INVALID_RESOURCE_HANDLE_INDEX,
          "Invalid resource handle");
   if (resources[handle.index].generation < handle.generation) {
-    LOG_WARN(
+    LOG_WARNING(
         "Attempting to destroy resource with older generation, this means the "
         "resource referenced by the handle has been destroyed and recreated, "
         "this may indicate a bug (but not necessarily)");
@@ -75,6 +99,39 @@ auto ResourceManager<T>::Destroy(ResourceHandle<T> handle) -> void {
   }
   resources[handle.index].generation++;
   free_indices.push_back(handle.index);
+}
+
+template <typename T>
+template <typename Func>
+auto ResourceManager<T>::Destroy(ResourceHandle<T> handle,
+                                  Func &&on_destroy) -> void {
+  ASSERT(handle.index < next_index &&
+             handle.index != INVALID_RESOURCE_HANDLE_INDEX,
+         "Invalid resource handle");
+  if (resources[handle.index].generation < handle.generation) {
+    LOG_WARNING(
+        "Attempting to destroy resource with older generation, this means the "
+        "resource referenced by the handle has been destroyed and recreated, "
+        "this may indicate a bug (but not necessarily)");
+    return;
+  }
+  std::forward<Func>(on_destroy)(resources[handle.index].resource);
+  resources[handle.index].generation++;
+  free_indices.push_back(handle.index);
+}
+
+template <typename T>
+template <typename Func>
+auto ResourceManager<T>::DestroyAll(Func &&on_destroy) -> void {
+  std::vector<ResourceHandle<T>> active_handles;
+  for (ResourceHandleIndexType i = 0; i < next_index; ++i) {
+    if (IsActive(i)) {
+      active_handles.push_back({i, resources[i].generation});
+    }
+  }
+  for (auto &handle : active_handles) {
+    std::forward<Func>(on_destroy)(handle);
+  }
 }
 
 template <typename T>
@@ -93,6 +150,17 @@ auto ResourceManager<T>::Set(ResourceHandle<T> handle, T &&resource) -> void {
     return;
   }
   resources[handle.index].resource = std::move(resource);
+}
+
+template <typename T>
+template <typename Func>
+auto ResourceManager<T>::ForEach(Func &&func) -> void {
+  for (ResourceHandleIndexType i = 0; i < next_index; ++i) {
+    if (IsActive(i)) {
+      ResourceHandle<T> handle{i, resources[i].generation};
+      std::forward<Func>(func)(handle, resources[i].resource);
+    }
+  }
 }
 
 } // namespace lumina::core
