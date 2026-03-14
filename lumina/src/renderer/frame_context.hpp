@@ -49,8 +49,8 @@ struct FrameContextUniformBuffer {
 
 class FrameContext {
 public:
-  FrameContext(VulkanContext &vulkan_context) noexcept
-      : vulkan_context(vulkan_context) {}
+  FrameContext(VulkanContext &vulkan_context_) noexcept
+      : vulkan_context(vulkan_context_) {}
   ~FrameContext() noexcept;
 
   FrameContext(FrameContext &&other) noexcept = delete;

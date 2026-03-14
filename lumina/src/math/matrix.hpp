@@ -1,5 +1,6 @@
 #pragma once
 
+#include "trigonometry.hpp"
 #include "vector.hpp"
 
 #include <utility>
@@ -162,13 +163,32 @@ inline auto TranslationMatrix(const Vec3 &translation) -> Mat4 {
   return mat;
 }
 
+// Euler angles (degrees) in YXZ intrinsic order (yaw -> pitch -> roll).
+// Row-major, Shuster convention (v * M) — matches Quaternion::CreateRotationMatrix().
 inline auto RotationMatrix(const Vec3 &rotation) -> Mat4 {
-  auto mat = Mat4::Identity();
+  const f32 pitch = DegreesToRadians(rotation.pitch);
+  const f32 yaw   = DegreesToRadians(rotation.yaw);
+  const f32 roll  = DegreesToRadians(rotation.roll);
+
+  const f32 cp = Cos(pitch), sp = Sin(pitch);
+  const f32 cy = Cos(yaw),   sy = Sin(yaw);
+  const f32 cr = Cos(roll),  sr = Sin(roll);
+
+  // Combined matrix: Ry * Rx * Rz (computed analytically)
+  Mat4 mat;
+  mat[0] = Vec4((cy*cr) - (sy*sp*sr),   (cy*sr) + (sy*sp*cr),  -(sy*cp),  0.0F);
+  mat[1] = Vec4(            -(cp*sr),               (cp*cr),        sp,   0.0F);
+  mat[2] = Vec4((sy*cr) + (cy*sp*sr),   (sy*sr) - (cy*sp*cr),   (cy*cp),  0.0F);
+  mat[3] = Vec4(           0.0F,              0.0F,      0.0F,  1.0F);
   return mat;
 }
 
 inline auto ScaleMatrix(const Vec3 &scale) -> Mat4 {
-  auto mat = Mat4::Identity();
+  auto mat = Mat4::Zero();
+  mat[0][0] = scale.x;
+  mat[1][1] = scale.y;
+  mat[2][2] = scale.z;
+  mat[3][3] = 1.0F;
   return mat;
 }
 

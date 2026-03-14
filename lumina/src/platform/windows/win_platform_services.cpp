@@ -85,10 +85,11 @@ auto WinReadFile(void *handle, void *data, std::size_t size) -> bool {
 
   // If file size is 0 read the whole file
   if (size == 0) {
-    size = GetFileSizeEx(static_cast<HANDLE>(handle), nullptr);
-    if (size == INVALID_FILE_SIZE) {
+    LARGE_INTEGER win_size;
+    if (GetFileSizeEx(static_cast<HANDLE>(handle), &win_size) == FALSE) {
       return false;
     }
+    size = SafeI64ToU64(win_size.QuadPart);
   }
 
   return ReadFile(static_cast<HANDLE>(handle), data, static_cast<DWORD>(size),
@@ -177,7 +178,7 @@ auto WinAnsiToWide(const char *ansiString) -> std::wstring {
     return {};
   }
 
-  std::wstring wideString(bufferSize, L'\0');
+  std::wstring wideString(SafeI32ToU64(bufferSize), L'\0');
   MultiByteToWideChar(CP_ACP, 0, ansiString, -1, wideString.data(), bufferSize);
   return wideString;
 }

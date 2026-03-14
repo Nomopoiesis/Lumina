@@ -1,6 +1,6 @@
 #pragma once
 
-#include "entity.hpp"
+#include "core/entity.hpp"
 
 #include <unordered_map>
 

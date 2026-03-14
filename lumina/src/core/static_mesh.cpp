@@ -13,6 +13,7 @@ auto GetElementTypeSize(ElementType element_type) noexcept -> u8 {
       return 2;
     case ElementType::Int32:
     case ElementType::Uint32:
+    case ElementType::Float:
       return 4;
     case ElementType::Int64:
     case ElementType::Uint64:

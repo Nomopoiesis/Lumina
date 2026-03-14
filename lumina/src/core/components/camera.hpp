@@ -53,9 +53,9 @@ inline auto CalculatePerspectiveMatrix(f32 fov_degrees, f32 aspect_ratio,
 
   result[0][0] = 1.0F / (aspect_ratio * tan_half_fov);
   result[1][1] = 1.0F / tan_half_fov;
-  result[2][2] = -(far_plane + near_plane) / range;
+  result[2][2] = (-far_plane) / range;
   result[2][3] = -1.0F;
-  result[3][2] = -(2.0F * far_plane * near_plane) / range;
+  result[3][2] = -(far_plane * near_plane) / range;
   result[3][3] = 0.0F;
 
   return result;

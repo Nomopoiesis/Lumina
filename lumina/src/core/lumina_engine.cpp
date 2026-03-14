@@ -21,7 +21,6 @@ static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
   UniformBufferObject ubo = {};
   ubo.view = CalculateViewMatrix(transform);
   ubo.proj = camera.ToProjectionMatrix();
-  ubo.proj[1][1] *= -1;
   memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
 }
@@ -93,12 +92,12 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   entity_id = world.CreateEntity();
   world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{0.0F, 0.0F, 0.0F},
-                                math::Vec3{1.0F, 1.0F, 1.0F});
+                                math::Vec3{1.2F, 1.2F, 1.2F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
   entity_id = world.CreateEntity();
   world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -1.0F},
-                                math::Vec3{0.0F, 0.0F, 0.0F},
+                                math::Vec3{-45.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
@@ -137,9 +136,11 @@ auto LuminaEngine::ExecuteFrame() -> void {
         if (!mesh.has_value()) {
           return;
         }
-        if (mesh->render_mesh_handle.index != INVALID_RESOURCE_HANDLE_INDEX) {
+        if (mesh->render_active) {
           return;
         }
+        mesh->render_active = true;
+        static_mesh_manager.Set(static_mesh_handle, std::move(*mesh));
         auto *job = job_manager->AcquireJob();
         job->execute = [static_mesh_handle](void *data) -> void {
           auto *engine = static_cast<LuminaEngine *>(data);
