@@ -111,6 +111,15 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                                 math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
+  entity_id = world.CreateEntity();
+  auto cube_static_mesh_handle = instance.static_mesh_manager.Create();
+  instance.static_mesh_manager.Set(cube_static_mesh_handle,
+                                   BasicGeometry::Cube());
+  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -3.0F},
+                                math::Vec3{0.0F, 0.0F, 0.0F},
+                                math::Vec3{1.0F, 1.0F, 1.0F});
+  world.AddComponent<StaticMeshComponent>(entity_id, cube_static_mesh_handle);
+
   instance.is_initialized = true;
 }
 
