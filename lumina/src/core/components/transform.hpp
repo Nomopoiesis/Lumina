@@ -109,15 +109,15 @@ public:
 
 private:
   // SOA layout
-  f32 pos_x[1024];
-  f32 pos_y[1024];
-  f32 pos_z[1024];
-  f32 rot_x[1024];
-  f32 rot_y[1024];
-  f32 rot_z[1024];
-  f32 scale_x[1024];
-  f32 scale_y[1024];
-  f32 scale_z[1024];
+  f32 pos_x[1024]{};
+  f32 pos_y[1024]{};
+  f32 pos_z[1024]{};
+  f32 rot_x[1024]{};
+  f32 rot_y[1024]{};
+  f32 rot_z[1024]{};
+  f32 scale_x[1024]{};
+  f32 scale_y[1024]{};
+  f32 scale_z[1024]{};
   size_t last_index = 0;
   std::unordered_map<EntityID, size_t> entity_to_index;
 };

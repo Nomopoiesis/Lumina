@@ -58,6 +58,16 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
 
+  instance.default_pipeline_handle = instance.renderer->CreateGraphicsPipeline(
+      {.vertex_layout = renderer::VertexBufferLayout::Interleave(
+           std::span<const VertexAttribute>(
+               {VertexAttribute{.type = VertexAttributeType::Position,
+                                .element_type = ElementType::Vec3},
+                VertexAttribute{.type = VertexAttributeType::Color,
+                                .element_type = ElementType::Vec3},
+                VertexAttribute{.type = VertexAttributeType::TexCoord,
+                                .element_type = ElementType::Vec2}}))});
+
   instance.camera_movement_controller =
       std::make_unique<CameraMovementController>(INVALID_ENTITY_ID);
 
@@ -146,8 +156,8 @@ auto LuminaEngine::ExecuteFrame() -> void {
           auto *engine = static_cast<LuminaEngine *>(data);
           auto m = engine->static_mesh_manager.Get(static_mesh_handle);
           ASSERT(m.has_value(), "Static mesh not found");
-          auto render_mesh_handle =
-              engine->GetRenderer().CreateRenderMesh(m.value());
+          auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
+              m.value(), engine->default_pipeline_handle);
           m->render_mesh_handle = render_mesh_handle;
           engine->static_mesh_manager.Set(static_mesh_handle, std::move(*m));
         };

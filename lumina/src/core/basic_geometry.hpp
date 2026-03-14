@@ -27,6 +27,7 @@ public:
         {1.0, 0.0},
         {0.0, 0.0},
     };
+    std::vector<u16> indices = {0, 1, 2, 2, 3, 0};
     mesh.vertex_count = positions.size();
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Position,
@@ -45,6 +46,7 @@ public:
         std::vector<u8>(
             reinterpret_cast<u8 *>(tex_coords.data()),
             reinterpret_cast<u8 *>(tex_coords.data() + tex_coords.size())));
+    mesh.indices = indices;
     return mesh;
   }
 };

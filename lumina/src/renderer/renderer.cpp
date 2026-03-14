@@ -5,6 +5,7 @@
 #include "common/lumina_assert.hpp"
 #include "common/lumina_terminate.hpp"
 #include "core/lumina_engine.hpp"
+#include "graphics_pipeline.hpp"
 #include "shaders/shader_module_cache.hpp"
 #include "vertex_layout.hpp"
 #include "vertex_serializer.hpp"
@@ -27,76 +28,6 @@
 namespace lumina::renderer {
 
 using namespace lumina::common::data_structures;
-
-struct Vertex {
-  math::Vec3 position;
-  math::Vec3 color;
-  math::Vec2 tex_coord;
-
-  static auto GetBindingDescription() -> VkVertexInputBindingDescription {
-    return {
-        .binding = 0,
-        .stride = sizeof(Vertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    };
-  }
-
-  static auto GetAttributeDescriptions()
-      -> std::array<VkVertexInputAttributeDescription, 3> {
-    return {
-        VkVertexInputAttributeDescription{
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(Vertex, position),
-        },
-        {
-            .location = 1,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(Vertex, color),
-        },
-        {
-            .location = 2,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = offsetof(Vertex, tex_coord),
-        },
-    };
-  }
-};
-
-static const auto vertices = std::vector<Vertex>{
-    {.position = {-0.5F, 0.5F, 0.0F},
-     .color = {1.0F, 1.0F, 1.0F},
-     .tex_coord = {0.0F, 0.0F}},
-    {.position = {-0.5F, -0.5F, 0.0F},
-     .color = {1.0F, 0.0F, 0.0F},
-     .tex_coord = {0.0F, 1.0F}},
-    {.position = {0.5F, -0.5F, 0.0F},
-     .color = {0.0F, 1.0F, 0.0F},
-     .tex_coord = {1.0F, 1.0F}},
-    {.position = {0.5F, 0.5F, 0.0F},
-     .color = {0.0F, 0.0F, 1.0F},
-     .tex_coord = {1.0F, 0.0F}},
-
-    {.position = {-0.5F, 0.5F, -0.5F},
-     .color = {1.0F, 1.0F, 1.0F},
-     .tex_coord = {0.0F, 0.0F}},
-    {.position = {-0.5F, -0.5F, -0.5F},
-     .color = {1.0F, 0.0F, 0.0F},
-     .tex_coord = {0.0F, 1.0F}},
-    {.position = {0.5F, -0.5F, -0.5F},
-     .color = {0.0F, 1.0F, 0.0F},
-     .tex_coord = {1.0F, 1.0F}},
-    {.position = {0.5F, 0.5F, -0.5F},
-     .color = {0.0F, 0.0F, 1.0F},
-     .tex_coord = {1.0F, 0.0F}},
-};
-
-const std::vector<u16> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
-
-const std::vector<u16> indices2 = {0, 1, 2, 2, 3, 0};
 
 static auto
 CreateDescriptorSetLayout(VulkanContext &vulkan_context,
@@ -827,9 +758,15 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   if (command_pool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(vulkan_context.GetDevice(), command_pool, nullptr);
   }
-  if (pipeline != VK_NULL_HANDLE) {
-    vkDestroyPipeline(vulkan_context.GetDevice(), pipeline, nullptr);
-  }
+  pipeline_manager.DestroyAll([this](GraphicsPipelineHandle handle) {
+    auto pipeline_opt = pipeline_manager.Get(handle);
+    if (pipeline_opt.has_value() &&
+        pipeline_opt->vk_pipeline != VK_NULL_HANDLE) {
+      vkDestroyPipeline(vulkan_context.GetDevice(), pipeline_opt->vk_pipeline,
+                        nullptr);
+    }
+  });
+
   if (pipeline_layout != VK_NULL_HANDLE) {
     vkDestroyPipelineLayout(vulkan_context.GetDevice(), pipeline_layout,
                             nullptr);
@@ -1022,25 +959,6 @@ auto LuminaRenderer::Initialize() -> void {
       depth_image_memory, depth_stencil_format);
   ASSERT(depth_result, "Failed to create depth resources");
 
-  if (!CreatePipeline()) {
-    LOG_CRITICAL("Failed to create pipeline: {}",
-                 CreatePipeline().error().message);
-    LUMINA_TERMINATE();
-  }
-
-  auto vert_data =
-      DataBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
-  auto index_data =
-      DataBuffer(indices.data(), indices.size() * sizeof(uint16_t));
-  /*
-    auto res = CreateVertexBuffer(vulkan_context, command_pool,
-    vert_data.View(), vertex_buffer_memory, vertex_buffer); ASSERT(res, "Failed
-    to create vertex buffer");
-
-    res = CreateIndexBuffer(vulkan_context, command_pool, index_data.View(),
-                            index_buffer_memory, index_buffer);
-    ASSERT(res, "Failed to create index buffer");
-  */
   auto res = CreateTextureImage(vulkan_context, command_pool, texture_image,
                                 texture_image_memory);
   ASSERT(res, "Failed to create texture image");
@@ -1211,27 +1129,74 @@ auto LuminaRenderer::CreatePipelineLayout()
   return std::expected<void, VkInitializationError>{};
 }
 
-auto LuminaRenderer::CreatePipeline()
-    -> std::expected<void, VkInitializationError> {
+static auto ToVkFormat(core::ElementType element_type) -> VkFormat {
+  switch (element_type) {
+    case core::ElementType::Float:
+      return VK_FORMAT_R32_SFLOAT;
+    case core::ElementType::Vec2:
+      return VK_FORMAT_R32G32_SFLOAT;
+    case core::ElementType::Vec3:
+      return VK_FORMAT_R32G32B32_SFLOAT;
+    case core::ElementType::Vec4:
+      return VK_FORMAT_R32G32B32A32_SFLOAT;
+    default:
+      ASSERT(false, "Unsupported element type for Vulkan vertex format");
+      return VK_FORMAT_UNDEFINED;
+  }
+}
+
+static auto ToVkBindingDescriptions(const VertexBufferLayout &layout)
+    -> std::vector<VkVertexInputBindingDescription> {
+  std::vector<VkVertexInputBindingDescription> descriptions;
+  descriptions.reserve(layout.streams.size());
+  for (u32 binding = 0; binding < static_cast<u32>(layout.streams.size());
+       ++binding) {
+    u32 stride = 0;
+    for (const auto &attr : layout.streams[binding].attributes) {
+      stride += core::GetElementTypeSize(attr.element_type);
+    }
+    descriptions.push_back({
+        .binding = binding,
+        .stride = stride,
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    });
+  }
+  return descriptions;
+}
+
+static auto ToVkAttributeDescriptions(const VertexBufferLayout &layout)
+    -> std::vector<VkVertexInputAttributeDescription> {
+  std::vector<VkVertexInputAttributeDescription> descriptions;
+  u32 location = 0;
+  for (u32 binding = 0; binding < static_cast<u32>(layout.streams.size());
+       ++binding) {
+    u32 offset = 0;
+    for (const auto &attr : layout.streams[binding].attributes) {
+      descriptions.push_back({
+          .location = location++,
+          .binding = binding,
+          .format = ToVkFormat(attr.element_type),
+          .offset = offset,
+      });
+      offset += core::GetElementTypeSize(attr.element_type);
+    }
+  }
+  return descriptions;
+}
+
+auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
+    -> GraphicsPipelineHandle {
   ShaderModuleCache shader_module_cache(vulkan_context.GetDevice());
 
   auto vert_module_result = shader_module_cache.GetShaderModule(
       "C:/Projects/c++/Lumina/lumina/data/shaders/spv/shader.vert.spv",
       VK_SHADER_STAGE_VERTEX_BIT);
-  if (!vert_module_result) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to create vertex shader: " +
-                                         vert_module_result.error().message});
-  }
+  ASSERT(vert_module_result, "Failed to create vertex shader");
 
   auto frag_module_result = shader_module_cache.GetShaderModule(
       "C:/Projects/c++/Lumina/lumina/data/shaders/spv/shader.frag.spv",
       VK_SHADER_STAGE_FRAGMENT_BIT);
-  if (!frag_module_result) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to create fragment shader: " +
-                                         frag_module_result.error().message});
-  }
+  ASSERT(frag_module_result, "Failed to create fragment shader");
 
   VkPipelineShaderStageCreateInfo shader_stages[] = {
       {
@@ -1264,15 +1229,16 @@ auto LuminaRenderer::CreatePipeline()
       .pDynamicStates = dynamic_states.data(),
   };
 
-  auto binding_description = Vertex::GetBindingDescription();
-  auto attribute_descriptions = Vertex::GetAttributeDescriptions();
+  auto binding_descriptions = ToVkBindingDescriptions(desc.vertex_layout);
+  auto attribute_descriptions = ToVkAttributeDescriptions(desc.vertex_layout);
 
   VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
       .pNext = nullptr,
       .flags = 0,
-      .vertexBindingDescriptionCount = 1,
-      .pVertexBindingDescriptions = &binding_description,
+      .vertexBindingDescriptionCount =
+          static_cast<u32>(binding_descriptions.size()),
+      .pVertexBindingDescriptions = binding_descriptions.data(),
       .vertexAttributeDescriptionCount =
           static_cast<u32>(attribute_descriptions.size()),
       .pVertexAttributeDescriptions = attribute_descriptions.data(),
@@ -1387,14 +1353,19 @@ auto LuminaRenderer::CreatePipeline()
       .basePipelineIndex = -1,
   };
 
+  GraphicsPipeline gfx_pipeline;
+  gfx_pipeline.vertex_layout = desc.vertex_layout;
+
   if (vkCreateGraphicsPipelines(vulkan_context.GetDevice(), nullptr, 1,
                                 &pipeline_create_info, nullptr,
-                                &pipeline) != VK_SUCCESS) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to create graphics pipeline"});
+                                &gfx_pipeline.vk_pipeline) != VK_SUCCESS) {
+    LOG_CRITICAL("Failed to create graphics pipeline");
+    LUMINA_TERMINATE();
   }
 
-  return std::expected<void, VkInitializationError>{};
+  auto handle = pipeline_manager.Create();
+  pipeline_manager.Set(handle, std::move(gfx_pipeline));
+  return handle;
 }
 
 auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
@@ -1508,8 +1479,6 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
 
   vkCmdBeginRendering(command_buffer, &rendering_info);
 
-  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
   VkViewport viewport = {
       .x = 0.0F,
       .y = static_cast<f32>(swap_chain_image_extent.height),
@@ -1537,6 +1506,12 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
       continue;
     }
     const auto &render_mesh = render_mesh_opt.value();
+    auto pipeline_opt = pipeline_manager.Get(render_mesh.pipeline_handle);
+    if (!pipeline_opt.has_value()) {
+      continue;
+    }
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipeline_opt->vk_pipeline);
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(command_buffer, 0, 1,
                            &render_mesh.vertex_streams[0].buffer, offsets);
@@ -1576,19 +1551,21 @@ auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
   command_context_pool.Release(&cmd_ctx);
 }
 
-auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh)
+auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
+                                      GraphicsPipelineHandle pipeline_handle)
     -> RenderMeshHandle {
+  auto pipeline_opt = pipeline_manager.Get(pipeline_handle);
+  ASSERT(pipeline_opt.has_value(),
+         "Pipeline not found for render mesh creation");
+  const VertexBufferLayout &layout = pipeline_opt->vertex_layout;
+
   auto &cmd_ctx = AcquireCommandContext();
   cmd_ctx.Begin();
   auto render_mesh_handle = render_mesh_manager.Create();
   auto render_mesh_opt = render_mesh_manager.Get(render_mesh_handle);
   ASSERT(render_mesh_opt.has_value(), "Render mesh not found");
   auto &render_mesh = render_mesh_opt.value();
-  VertexBufferLayout layout =
-      VertexBufferLayout::Interleave(std::span<const core::VertexAttributeType>(
-          {core::VertexAttributeType::Position,
-           core::VertexAttributeType::Color,
-           core::VertexAttributeType::TexCoord}));
+  render_mesh.pipeline_handle = pipeline_handle;
   auto vertex_streams_data = SerializeVertexBuffer(mesh, layout);
   render_mesh.vertex_count = mesh.vertex_count;
   std::vector<VulkanBufferResources> staging_resources;
@@ -1606,8 +1583,8 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh)
     staging_resources.emplace_back(staging_buffer);
   }
 
-  DataBuffer index_buffer = DataBuffer(indices2.size() * sizeof(u16));
-  index_buffer.Write(0, indices2.data(), indices2.size() * sizeof(u16));
+  DataBuffer index_buffer = DataBuffer(mesh.indices.size() * sizeof(u16));
+  index_buffer.Write(0, mesh.indices.data(), mesh.indices.size() * sizeof(u16));
   auto [success, staging_buffer, device_buffer] =
       RecordIndexBufferUploadCommands(
           *cmd_ctx.vulkan_context, cmd_ctx.command_buffer, index_buffer.View());
@@ -1615,7 +1592,7 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh)
   ASSERT(success, "Failed to create index buffer");
   render_mesh.index_buffer = device_buffer.buffer;
   render_mesh.index_buffer_memory = device_buffer.memory;
-  render_mesh.index_count = indices2.size();
+  render_mesh.index_count = mesh.indices.size();
   staging_resources.emplace_back(staging_buffer);
   render_mesh.ready = false;
   render_mesh_manager.Set(render_mesh_handle, std::move(render_mesh));

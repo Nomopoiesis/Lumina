@@ -144,6 +144,7 @@ private:
   std::unique_ptr<World> current_world;
 
   StaticMeshManager static_mesh_manager;
+  renderer::GraphicsPipelineHandle default_pipeline_handle;
 };
 
 } // namespace lumina::core

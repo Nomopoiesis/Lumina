@@ -3,23 +3,22 @@
 namespace lumina::renderer {
 
 auto VertexBufferLayout::Interleave(
-    std::span<const core::VertexAttributeType> attributes)
-    -> VertexBufferLayout {
+    std::span<const core::VertexAttribute> attributes) -> VertexBufferLayout {
   VertexBufferLayout layout;
-  std::vector<core::VertexAttributeType> interleaved_attributes(
-      attributes.begin(), attributes.end());
-  layout.streams.emplace_back(VertexStreamLayout{interleaved_attributes});
+  layout.streams.emplace_back(
+      VertexStreamLayout{std::vector<core::VertexAttribute>(attributes.begin(),
+                                                            attributes.end())});
   return layout;
 }
 
-auto VertexBufferLayout::Seperate(
-    std::span<const core::VertexAttributeType> attributes)
-    -> VertexBufferLayout {
+auto VertexBufferLayout::Separate(
+    std::span<const core::VertexAttribute> attributes) -> VertexBufferLayout {
   VertexBufferLayout layout;
   for (const auto &attribute : attributes) {
     layout.streams.emplace_back(
-        VertexStreamLayout{std::vector<core::VertexAttributeType>{attribute}});
+        VertexStreamLayout{std::vector<core::VertexAttribute>{attribute}});
   }
   return layout;
 }
+
 } // namespace lumina::renderer

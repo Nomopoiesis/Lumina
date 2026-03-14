@@ -4,6 +4,7 @@
 
 #include "command_context.hpp"
 #include "frame_context.hpp"
+#include "graphics_pipeline.hpp"
 #include "vulkan_context.hpp"
 
 #include "core/static_mesh.hpp"
@@ -68,7 +69,12 @@ public:
 
   auto AcquireCommandContext() -> CommandContext &;
 
-  auto CreateRenderMesh(const core::StaticMesh &mesh) -> RenderMeshHandle;
+  auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
+      -> GraphicsPipelineHandle;
+
+  auto CreateRenderMesh(const core::StaticMesh &mesh,
+                        GraphicsPipelineHandle pipeline_handle)
+      -> RenderMeshHandle;
   auto DestroyRenderMesh(RenderMeshHandle handle) -> void;
 
 private:
@@ -86,7 +92,6 @@ private:
   auto PollAndExecuteCommandContexts() -> void;
 
   auto CreatePipelineLayout() -> std::expected<void, VkInitializationError>;
-  auto CreatePipeline() -> std::expected<void, VkInitializationError>;
 
   auto RecordCommandBuffer(FrameContext &frame_context,
                            u32 image_index) noexcept
@@ -108,7 +113,6 @@ private:
   VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 
-  VkPipeline pipeline = VK_NULL_HANDLE;
   VkCommandPool command_pool = VK_NULL_HANDLE;
 
   std::counting_semaphore<MAX_FRAMES_IN_FLIGHT> frames_available_for_update{
@@ -136,6 +140,7 @@ private:
       pending_submissions;
 
   RenderMeshManager render_mesh_manager;
+  GraphicsPipelineManager pipeline_manager;
 };
 
 } // namespace lumina::renderer

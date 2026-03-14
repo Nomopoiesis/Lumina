@@ -16,7 +16,7 @@ auto SerializeVertexBuffer(const core::StaticMesh &mesh,
       auto it = std::ranges::find_if(
           mesh.vertex_attributes,
           [stream_attribute](const auto &attribute) -> bool {
-            return attribute.first.type == stream_attribute;
+            return attribute.first.type == stream_attribute.type;
           });
       ASSERT(it != mesh.vertex_attributes.end(),
              "Stream attribute not found in mesh vertex attributes");
