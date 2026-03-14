@@ -75,6 +75,15 @@ auto JobManager::WorkerEntryPoint(WorkerContext *worker_context) -> void {
 
 auto JobManager::WorkerLoop(WorkerContext *ctx) -> void {
   while (!ctx->job_manager->IsShutdownRequested()) {
+    // Drain any externally submitted jobs into the local work-stealing deque
+    // so they become stealable by other workers.
+    Job *ext_job = nullptr;
+    while (ctx->external_job_queue.Pop(ext_job)) {
+      if (!ctx->work_stealing_deque.Push(ext_job)) {
+        ASSERT(false, "Failed to drain external job into work stealing deque");
+      }
+    }
+
     Job *job = nullptr;
     FiberHandle handle = nullptr;
     // first try to resume a fiber from the resume queue, we we get nothing,
@@ -199,14 +208,16 @@ auto JobManager::SubmitJob(Job *job) -> void {
     ASSERT(false, "Failed to push job to local work stealing deque");
   }
 
-  // We are a outsider thread which created a new job, we need to push it to a
-  // random worker, we use a round robin approach to avoid bias
+  // We are an external thread (main, render, etc.). Push to a worker's external
+  // job queue via round-robin. The external queue is safe for multiple producers
+  // and will be drained into the worker's work-stealing deque, making the job
+  // stealable by other workers.
   auto worker_index =
       round_robin_index.fetch_add(1, std::memory_order_relaxed) %
       worker_contexts.size();
   for (size_t i = 0; i < worker_contexts.size(); ++i) {
     size_t index = (worker_index + i) % worker_contexts.size();
-    if (worker_contexts[index]->work_stealing_deque.Push(job)) {
+    if (worker_contexts[index]->external_job_queue.Push(job)) {
       return;
     }
   }

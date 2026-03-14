@@ -63,6 +63,8 @@ using FiberPool = common::data_structures::LockFreeObjectPool<FiberContext>;
 using CounterPool = common::data_structures::LockFreeObjectPool<Counter>;
 using FiberQueue =
     common::data_structures::LockFreeConcurrentQueue<FiberHandle>;
+using ExternalJobQueue =
+    common::data_structures::LockFreeConcurrentQueue<Job *>;
 
 class JobManager {
 public:
@@ -79,6 +81,7 @@ public:
     FiberHandle current_fiber;
 
     JobStealingDeque work_stealing_deque;
+    ExternalJobQueue external_job_queue{256};
   };
 
   JobManager() noexcept : resume_queue(64) {}
