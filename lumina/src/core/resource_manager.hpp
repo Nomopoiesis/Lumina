@@ -4,26 +4,13 @@
 
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
+#include "resource_manager_handle.hpp"
 
 #include <algorithm>
 #include <optional>
 #include <utility>
-#include <vector>
 
 namespace lumina::core {
-
-using ResourceHandleIndexType = u32;
-
-constexpr ResourceHandleIndexType INVALID_RESOURCE_HANDLE_INDEX =
-    static_cast<ResourceHandleIndexType>(-1);
-
-template <typename T>
-struct ResourceHandle {
-  ResourceHandleIndexType index = INVALID_RESOURCE_HANDLE_INDEX;
-  u32 generation = 0;
-
-  auto operator==(const ResourceHandle &other) const -> bool = default;
-};
 
 template <typename T>
 class ResourceManager {
@@ -64,7 +51,7 @@ private:
 
   ResourceEntry resources[1024];
   std::vector<ResourceHandleIndexType> free_indices;
-  ResourceHandleIndexType next_index = 0;
+  std::atomic<ResourceHandleIndexType> next_index{0};
 };
 
 template <typename T>
@@ -80,14 +67,14 @@ auto ResourceManager<T>::Create() -> ResourceHandle<T> {
     index = free_indices.back();
     free_indices.pop_back();
   } else {
-    index = next_index++;
+    index = next_index.fetch_add(1);
   }
   return ResourceHandle<T>{index, resources[index].generation};
 }
 
 template <typename T>
 auto ResourceManager<T>::Destroy(ResourceHandle<T> handle) -> void {
-  ASSERT(handle.index < next_index &&
+  ASSERT(handle.index < next_index.load(std::memory_order_relaxed) &&
              handle.index != INVALID_RESOURCE_HANDLE_INDEX,
          "Invalid resource handle");
   if (resources[handle.index].generation < handle.generation) {
@@ -103,9 +90,9 @@ auto ResourceManager<T>::Destroy(ResourceHandle<T> handle) -> void {
 
 template <typename T>
 template <typename Func>
-auto ResourceManager<T>::Destroy(ResourceHandle<T> handle,
-                                  Func &&on_destroy) -> void {
-  ASSERT(handle.index < next_index &&
+auto ResourceManager<T>::Destroy(ResourceHandle<T> handle, Func &&on_destroy)
+    -> void {
+  ASSERT(handle.index < next_index.load(std::memory_order_relaxed) &&
              handle.index != INVALID_RESOURCE_HANDLE_INDEX,
          "Invalid resource handle");
   if (resources[handle.index].generation < handle.generation) {
@@ -124,7 +111,8 @@ template <typename T>
 template <typename Func>
 auto ResourceManager<T>::DestroyAll(Func &&on_destroy) -> void {
   std::vector<ResourceHandle<T>> active_handles;
-  for (ResourceHandleIndexType i = 0; i < next_index; ++i) {
+  for (ResourceHandleIndexType i = 0;
+       i < next_index.load(std::memory_order_relaxed); ++i) {
     if (IsActive(i)) {
       active_handles.push_back({i, resources[i].generation});
     }
@@ -136,7 +124,7 @@ auto ResourceManager<T>::DestroyAll(Func &&on_destroy) -> void {
 
 template <typename T>
 auto ResourceManager<T>::Get(ResourceHandle<T> handle) -> std::optional<T> {
-  if (handle.index >= next_index ||
+  if (handle.index >= next_index.load(std::memory_order_relaxed) ||
       resources[handle.index].generation != handle.generation) {
     return std::nullopt;
   }
@@ -145,7 +133,7 @@ auto ResourceManager<T>::Get(ResourceHandle<T> handle) -> std::optional<T> {
 
 template <typename T>
 auto ResourceManager<T>::Set(ResourceHandle<T> handle, T &&resource) -> void {
-  if (handle.index >= next_index ||
+  if (handle.index >= next_index.load(std::memory_order_relaxed) ||
       resources[handle.index].generation != handle.generation) {
     return;
   }
@@ -155,7 +143,8 @@ auto ResourceManager<T>::Set(ResourceHandle<T> handle, T &&resource) -> void {
 template <typename T>
 template <typename Func>
 auto ResourceManager<T>::ForEach(Func &&func) -> void {
-  for (ResourceHandleIndexType i = 0; i < next_index; ++i) {
+  for (ResourceHandleIndexType i = 0;
+       i < next_index.load(std::memory_order_relaxed); ++i) {
     if (IsActive(i)) {
       ResourceHandle<T> handle{i, resources[i].generation};
       std::forward<Func>(func)(handle, resources[i].resource);

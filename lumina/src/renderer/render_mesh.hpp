@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/resource_manager.hpp"
+#include "graphics_pipeline_handle.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -28,6 +28,8 @@ public:
   size_t index_count = 0;
   VkBuffer index_buffer = VK_NULL_HANDLE;
   VkDeviceMemory index_buffer_memory = VK_NULL_HANDLE;
+
+  GraphicsPipelineHandle pipeline_handle;
 };
 
 using RenderMeshHandle = core::ResourceHandle<RenderMesh>;

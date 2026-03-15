@@ -49,6 +49,7 @@ public:
   bool render_active = false;
   size_t vertex_count = 0;
   std::vector<std::pair<VertexAttribute, std::vector<u8>>> vertex_attributes;
+  std::vector<u16> indices;
   renderer::RenderMeshHandle render_mesh_handle;
 };
 

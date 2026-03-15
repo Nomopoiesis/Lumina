@@ -8,16 +8,16 @@
 namespace lumina::renderer {
 
 struct VertexStreamLayout {
-  std::vector<core::VertexAttributeType> attributes;
+  std::vector<core::VertexAttribute> attributes;
 };
 
 struct VertexBufferLayout {
   std::vector<VertexStreamLayout> streams;
 
-  static auto Interleave(std::span<const core::VertexAttributeType> attributes)
+  static auto Interleave(std::span<const core::VertexAttribute> attributes)
       -> VertexBufferLayout;
 
-  static auto Seperate(std::span<const core::VertexAttributeType> attributes)
+  static auto Separate(std::span<const core::VertexAttribute> attributes)
       -> VertexBufferLayout;
 };
 
