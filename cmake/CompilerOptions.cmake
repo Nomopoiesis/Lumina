@@ -28,6 +28,9 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     -Wno-gnu-anonymous-struct
     -Wno-unsafe-buffer-usage-in-libc-call
     -Wno-nested-anon-types
-    -Wno-c++17-extensions)
+    -Wno-c++17-extensions
+    -Wno-c++20-extensions
+    -Wno-c++20-compat
+    -Wno-unsafe-buffer-usage)
 
 endif()

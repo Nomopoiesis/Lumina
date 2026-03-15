@@ -12,11 +12,11 @@ auto InputDispatcher::Dispatch(const InputState &input_state) -> void {
   if (actions.empty()) {
     return;
   }
-  auto handlers = this->handlers;
-  while (!handlers.empty()) {
-    auto [priority, handler] = handlers.top();
+  auto local_handlers = this->handlers;
+  while (!local_handlers.empty()) {
+    auto [priority, handler] = local_handlers.top();
     handler->HandleInput(actions);
-    handlers.pop();
+    local_handlers.pop();
   }
 }
 

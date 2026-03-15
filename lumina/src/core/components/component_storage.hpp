@@ -30,8 +30,9 @@ private:
 template <typename T>
 template <typename... Args>
 auto ComponentStorage<T>::Create(EntityID id, Args &&...args) -> void {
-  static_assert(std::is_constructible_v<T, Args...>,
-                "T must be constructible from Args...");
+  static_assert(
+      std::is_constructible_v<T, Args...> && std::is_default_constructible_v<T>,
+      "T must be constructible from Args... and default constructible");
   data_[id] = T(std::forward<Args>(args)...);
 }
 

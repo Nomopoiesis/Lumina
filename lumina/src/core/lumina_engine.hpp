@@ -4,7 +4,6 @@
 
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
-#include "math/basic.hpp"
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
 #include "camera_movement_controller.hpp"
@@ -12,6 +11,8 @@
 #include "input/input_state.hpp"
 #include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
+#include "resource_manager.hpp"
+#include "static_mesh.hpp"
 #include "world.hpp"
 
 namespace lumina::core {
@@ -126,6 +127,8 @@ private:
   std::unique_ptr<renderer::LuminaRenderer> renderer = nullptr;
 
   std::unique_ptr<World> current_world;
+
+  ResourceManager<StaticMesh> static_mesh_manager;
 };
 
 } // namespace lumina::core
