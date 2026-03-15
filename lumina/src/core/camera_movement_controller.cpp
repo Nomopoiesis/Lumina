@@ -14,6 +14,7 @@ auto CameraMovementController::HandleInput(
   math::Vec3 look_rotation{};
   bool trap_cursor = false;
   auto &engine = LuminaEngine::Instance();
+  auto dt = engine.GetFrameDeltaTimeF();
   auto &world = engine.GetCurrentWorld();
   auto camera_id = world.GetActiveCamera();
   auto transform = world.GetComponent<components::Transform>(camera_id);
@@ -48,10 +49,10 @@ auto CameraMovementController::HandleInput(
       trap_cursor = action_event.key_state == KeyState::Held;
     }
   }
-  transform.Move(move_direction * move_speed);
+  transform.Move(move_direction * move_speed * dt);
   if (trap_cursor) {
     engine.SetCursorTrapped(true);
-    look_rotation *= look_speed;
+    look_rotation *= look_speed * dt;
     transform.Rotate(look_rotation);
   } else {
     engine.SetCursorTrapped(false);

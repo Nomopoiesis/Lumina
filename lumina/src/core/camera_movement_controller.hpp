@@ -21,8 +21,8 @@ public:
 
 private:
   EntityID camera_entity_id;
-  f32 move_speed = 0.0001F;
-  f32 look_speed = 0.1F;
+  f32 move_speed = 1.0F;
+  f32 look_speed = 30.0F;
 };
 
 } // namespace lumina::core
