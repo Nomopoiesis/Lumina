@@ -456,18 +456,32 @@ public:
   [[nodiscard]] auto DataPtr() const -> const ScalarType * { return &e[0]; }
 };
 
-template <typename T> auto Normalize(const T &&vec) -> T {
+// Vector concept, check that T has VectorBase as a base class
+template <typename T>
+concept VectorType = requires(T vec) { std::is_base_of_v<VectorBase, T>; };
+
+template <VectorType T> auto Normalize(const T &&vec) -> T {
   T result = vec;
   return result.Normalize();
 }
 
-template <typename T> auto Length(const T &&vec) -> typename T::ScalarType {
+template <VectorType T> auto Length(const T &&vec) -> typename T::ScalarType {
   return vec.Length();
 }
 
-template <typename T> auto LengthSqr(const T &&vec) -> typename T::ScalarType {
+template <VectorType T>
+auto LengthSqr(const T &&vec) -> typename T::ScalarType {
   return vec.LengthSqr();
 }
 
-} // namespace lumina::math
+template <VectorType T>
+auto operator*(T vec, const typename T::ScalarType scalar) -> T {
+  return vec *= scalar;
+}
 
+template <VectorType T>
+auto operator*(const typename T::ScalarType scalar, T vec) -> T {
+  return vec *= scalar;
+}
+
+} // namespace lumina::math

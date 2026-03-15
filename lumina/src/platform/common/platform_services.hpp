@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common/lumina_terminate.hpp"
+#include "common/lumina_types.hpp"
 #include <cstddef>
 #include <print>
 #include <thread>
@@ -23,7 +25,7 @@ public:
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized_) {
       std::print("PlatformServices not initialized, call Initialize() first");
-      std::terminate();
+      LUMINA_TERMINATE();
     }
     return instance;
   }
@@ -46,7 +48,9 @@ public:
       void *(*create_fiber)(std::size_t stack_size,
                             void (*entry_point)(void *data), void *data),
       void *(*convert_thread_to_fiber)(void *data),
-      void (*switch_to_fiber)(void *from_fiber, void *to_fiber)) -> void {
+      void (*switch_to_fiber)(void *from_fiber, void *to_fiber),
+      void (*set_cursor_position)(f32 x, f32 y),
+      void (*set_cursor_trapped)(bool trapped)) -> void {
     auto &instance = GetStaticInstance();
     instance.LuminaCreateFile = create_file;
     instance.LuminaOpenFile = open_file;
@@ -63,6 +67,8 @@ public:
     instance.LuminaCreateFiber = create_fiber;
     instance.LuminaConvertThreadToFiber = convert_thread_to_fiber;
     instance.LuminaSwitchToFiber = switch_to_fiber;
+    instance.LuminaSetCursorPosition = set_cursor_position;
+    instance.LuminaSetCursorTrapped = set_cursor_trapped;
     instance.is_initialized_ = true;
   }
 
@@ -131,6 +137,12 @@ public:
   // from_fiber: the fiber to switch from
   // to_fiber: the fiber to switch to
   void (*LuminaSwitchToFiber)(void *from_fiber, void *to_fiber) = nullptr;
+
+  // Cursor operations
+  // Sets the cursor position
+  void (*LuminaSetCursorPosition)(f32 x, f32 y) = nullptr;
+  // Sets the cursor trapped
+  void (*LuminaSetCursorTrapped)(bool trapped) = nullptr;
 
 private:
   PlatformServices() = default;

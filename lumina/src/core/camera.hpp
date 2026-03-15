@@ -67,6 +67,11 @@ public:
   [[nodiscard]] auto GetViewMatrix() const -> math::Mat4;
   [[nodiscard]] auto GetViewProjectionMatrix() const -> math::Mat4;
 
+  auto GetTransform() const -> const Transform & { return transform; }
+
+  auto Move(const math::Vec3 &direction) -> void;
+  auto Rotate(const math::Vec3 &rotation) -> void;
+
 private:
   Transform transform;
   CameraSettings settings;

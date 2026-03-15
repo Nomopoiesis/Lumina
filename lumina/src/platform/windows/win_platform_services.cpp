@@ -1,11 +1,10 @@
 #include "win_platform_services.hpp"
 
-#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-#undef WIN32_LEAN_AND_MEAN
 
 #include "common/logger/logger.hpp"
 #include "platform/common/platform_services.hpp"
+#include "win_window.hpp"
 #include <conio.h>
 #include <cstddef>
 #include <wchar.h>
@@ -217,6 +216,28 @@ auto WinSwitchToFiber(void *from_fiber [[maybe_unused]], void *to_fiber)
   SwitchToFiber(to_fiber);
 }
 
+auto WinSetCursorPosition(f32 x, f32 y) -> void {
+  POINT point = {static_cast<int>(x), static_cast<int>(y)};
+  auto *window = Window::Instance().GetWindowHandle();
+  ClientToScreen(window, &point);
+  SetCursorPos(point.x, point.y);
+}
+
+auto WinSetCursorTrapped(bool trapped) -> void {
+  Window::Instance().SetMouseTrapped(trapped);
+  ShowCursor(trapped ? FALSE : TRUE);
+  if (trapped) {
+    RECT window_rect;
+    GetClientRect(Window::Instance().GetWindowHandle(), &window_rect);
+    POINT center = {
+        (window_rect.left + window_rect.right) / 2,
+        (window_rect.top + window_rect.bottom) / 2,
+    };
+    ClientToScreen(Window::Instance().GetWindowHandle(), &center);
+    SetCursorPos(center.x, center.y);
+  }
+}
+
 } // namespace
 
 auto InitPlatformServices() -> void {
@@ -224,7 +245,8 @@ auto InitPlatformServices() -> void {
       WinCreateFile, WinOpenFile, WinGetFileSize, WinWriteFile, WinReadFile,
       WinCloseFile, WinDeleteFile, WinCreateConsole, WinWriteConsole,
       WinWaitConsoleKeypress, WinSetThreadName, WinPinThread, WinCreateFiber,
-      WinConvertThreadToFiber, WinSwitchToFiber);
+      WinConvertThreadToFiber, WinSwitchToFiber, WinSetCursorPosition,
+      WinSetCursorTrapped);
 }
 
 } // namespace lumina::platform::windows

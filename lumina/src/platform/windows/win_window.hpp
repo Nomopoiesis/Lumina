@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/lumina_terminate.hpp"
 #include "core/lumina_engine.hpp"
 #include "lumina_types.hpp"
 
@@ -8,9 +9,7 @@
 #include <stdexcept>
 #include <string>
 
-#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-#undef WIN32_LEAN_AND_MEAN
 
 namespace lumina::platform::windows {
 
@@ -24,7 +23,7 @@ public:
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized) {
       LOG_CRITICAL("Window not initialized, call Create() first");
-      std::terminate();
+      LUMINA_TERMINATE();
     }
     return instance;
   }
@@ -36,6 +35,7 @@ public:
   static auto Destroy() -> void;
   [[nodiscard]] auto IsRunning() const -> bool;
   auto ProcessMessages() -> void;
+  auto ProcessMouseMovement() -> void;
 
   [[nodiscard]] auto GetWindowClientDimensions() const
       -> core::WindowDimensions;
@@ -44,6 +44,9 @@ public:
 
   [[nodiscard]] auto GetWindowHandle() const -> HWND { return window_handle; }
   [[nodiscard]] auto GetHInstance() const -> HINSTANCE { return instance; }
+
+  auto SetMouseTrapped(bool trapped) -> void { mouse_trapped = trapped; }
+  [[nodiscard]] auto IsMouseTrapped() const -> bool { return mouse_trapped; }
 
 private:
   Window() noexcept = default;
@@ -61,10 +64,12 @@ private:
 
   HWND window_handle = nullptr;
   HINSTANCE instance = nullptr;
+  bool is_initialized = false;
 
   bool is_running = false;
 
-  bool is_initialized = false;
+  bool mouse_trapped = false;
+  POINT previous_mouse_position = {0, 0};
 };
 
 } // namespace lumina::platform::windows

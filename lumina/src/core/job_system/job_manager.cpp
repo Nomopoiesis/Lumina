@@ -2,12 +2,12 @@
 
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
+#include "common/lumina_terminate.hpp"
 #include "common/lumina_util.hpp"
 #include "lumina_assert.hpp"
 #include "lumina_types.hpp"
 #include "platform/common/platform_services.hpp"
 
-#include <stdexcept>
 #include <thread>
 
 namespace lumina::core::job_system {
@@ -15,7 +15,7 @@ namespace lumina::core::job_system {
 auto JobManager::Initialize(JobManagerInitializeInfo initialize_info) -> void {
   if (is_initialized_) {
     LOG_CRITICAL("JobManager already initialized");
-    std::terminate();
+    LUMINA_TERMINATE();
   }
 
   if (initialize_info.num_workers == 0) {
@@ -214,7 +214,7 @@ auto JobManager::SubmitJob(Job *job) -> void {
   LOG_CRITICAL(
       "Failed to submit job to any worker, this will lead to a lost job, "
       "and potential deadlock");
-  std::terminate();
+  LUMINA_TERMINATE();
 }
 
 auto JobManager::WaitForCounter(Counter *counter) -> void {
@@ -277,7 +277,7 @@ auto JobManager::Signal(Counter *counter) -> void {
               LOG_CRITICAL(
                   "Failed to push fiber handle to resume queue, this will lead "
                   "to a lost job, and potential deadlock");
-              std::terminate();
+              LUMINA_TERMINATE();
             }
             retry_count++;
             std::this_thread::yield();

@@ -2,6 +2,7 @@
 
 #include "log_levels.hpp"
 #include "log_target.hpp"
+#include "lumina_terminate.hpp"
 #include "lumina_types.hpp"
 #include "platform/common/platform_services.hpp"
 
@@ -15,7 +16,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 
 namespace lumina::common::logger {
 
@@ -40,7 +40,7 @@ public:
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized_) {
       std::print("Logger not initialized, call Initialize() first");
-      std::terminate();
+      LUMINA_TERMINATE();
     }
     return instance;
   }
@@ -127,8 +127,15 @@ public:
     queue_condition_.notify_one();
   }
 
+  auto Flush() -> void;
+
   // Shutdown the logger, flush all messages, and stop background thread
   static auto Shutdown() -> void;
+
+  static auto IsInitialized() -> bool {
+    auto &instance = GetStaticInstance();
+    return instance.is_initialized_;
+  }
 
 private:
   Logger() noexcept = default;

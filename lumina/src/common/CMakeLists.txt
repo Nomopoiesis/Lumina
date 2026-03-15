@@ -19,8 +19,17 @@ target_sources(
             logger/console_target.hpp
             logger/file_target.hpp
             logger/logger.hpp
+            lumina_terminate.hpp
             data_structures/lock_free_pool.hpp
             data_structures/work_stealing_deque.hpp)
+
+add_library(lumina_common_terminate STATIC)
+target_sources(lumina_common_terminate PRIVATE lumina_terminate.cpp)
+
+target_include_directories(lumina_common_terminate
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(lumina_common_terminate PRIVATE lumina_logger)
 
 # Logger implementation library - STATIC library for logger source files
 add_library(lumina_logger STATIC)

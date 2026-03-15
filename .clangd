@@ -41,4 +41,5 @@ Diagnostics:
       - cppcoreguidelines-non-private-member-variables-in-classes
       - readability-convert-member-functions-to-static
       - readability-identifier-length
+      - cppcoreguidelines-avoid-do-while
       
