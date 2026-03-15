@@ -4,10 +4,11 @@
 #include <Windows.h>
 #undef WIN32_LEAN_AND_MEAN
 
+#include "common/logger/logger.hpp"
+#include "platform/common/platform_services.hpp"
 #include <conio.h>
 #include <cstddef>
-
-#include "platform/common/platform_services.hpp"
+#include <wchar.h>
 
 namespace lumina::platform::windows {
 
@@ -168,13 +169,62 @@ auto WinWaitConsoleKeypress() -> void {
   (void)_getch();
 }
 
+auto WinAnsiToWide(const char *ansiString) -> std::wstring {
+  // Determine the required buffer size for the wide string
+  // CP_ACP specifies the current Windows ANSI code page
+  int bufferSize = MultiByteToWideChar(CP_ACP, 0, ansiString, -1, nullptr, 0);
+
+  if (bufferSize == 0) {
+    return {};
+  }
+
+  std::wstring wideString(bufferSize, L'\0');
+  MultiByteToWideChar(CP_ACP, 0, ansiString, -1, wideString.data(), bufferSize);
+  return wideString;
+}
+
+auto WinSetThreadName(const char *name) -> void {
+  if (name == nullptr) {
+    return;
+  }
+  auto wide_name = WinAnsiToWide(name);
+  if (wide_name.empty()) {
+    return;
+  }
+  SetThreadDescription(GetCurrentThread(), wide_name.c_str());
+}
+
+auto WinPinThread(std::thread::native_handle_type thread_handle,
+                  size_t core_index) -> void {
+  auto result = SetThreadAffinityMask(thread_handle, 1 << core_index);
+  if (result == 0) {
+    LOG_WARNING("Failed to pin thread to core: {}", GetLastError());
+  }
+}
+
+auto WinCreateFiber(std::size_t stack_size, void (*entry_point)(void *data),
+                    void *data) -> void * {
+  return CreateFiberEx(stack_size, 0, FIBER_FLAG_FLOAT_SWITCH, entry_point,
+                       data);
+}
+
+auto WinConvertThreadToFiber(void *data) -> void * {
+  return ConvertThreadToFiberEx(data, FIBER_FLAG_FLOAT_SWITCH);
+}
+
+auto WinSwitchToFiber(void *from_fiber [[maybe_unused]], void *to_fiber)
+    -> void {
+  SwitchToFiber(to_fiber);
+}
+
 } // namespace
 
 auto InitPlatformServices() -> void {
   lumina::platform::common::PlatformServices::Initialize(
       WinCreateFile, WinOpenFile, WinGetFileSize, WinWriteFile, WinReadFile,
       WinCloseFile, WinDeleteFile, WinCreateConsole, WinWriteConsole,
-      WinWaitConsoleKeypress);
+      WinWaitConsoleKeypress, WinSetThreadName, WinPinThread, WinCreateFiber,
+      WinConvertThreadToFiber, WinSwitchToFiber);
 }
 
 } // namespace lumina::platform::windows

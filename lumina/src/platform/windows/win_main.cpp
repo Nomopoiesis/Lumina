@@ -47,7 +47,7 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     Window::Destroy();
   });
 
-  LOG_TRACE("Initializing Vulkan...");
+  LOG_TRACE("Initializing Vulkan Windows Platform...");
   auto vulkan_init_result = windows::vulkan::InitializeVulkan(window);
   if (!vulkan_init_result) {
     LOG_ERROR("Initailization failure: {}", vulkan_init_result.error().message);
@@ -56,7 +56,7 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   auto &vulkan_init_res = vulkan_init_result.value();
   ScopeGuard vulkan_guard([&vulkan_init_res]() -> void {
-    LOG_TRACE("Destroying Vulkan...");
+    LOG_TRACE("Destroying Vulkan Windows Platform...");
     vulkan::DestroyVulkan(vulkan_init_res);
   }); // Destroy vulkan on exit
 

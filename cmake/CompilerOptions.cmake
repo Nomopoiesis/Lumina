@@ -16,7 +16,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   message(STATUS "Using GCC/Clang compiler")
   # GCC/Clang compiler options
-  add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter
-                      -Wno-c++98-compat -Wno-c++98-compat-pedantic)
+  add_compile_options(
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wno-unused-parameter
+    -Wno-c++98-compat
+    -Wno-c++98-compat-pedantic
+    -Wno-extra-semi-stmt
+    -Wno-switch-default)
 
 endif()
