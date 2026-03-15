@@ -46,7 +46,7 @@ static auto
 ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &formats)
     -> VkSurfaceFormatKHR {
   for (const auto &format : formats) {
-    if (format.format == VK_FORMAT_B8G8R8A8_UNORM &&
+    if (format.format == VK_FORMAT_B8G8R8A8_SRGB &&
         format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
       return format;
     }
@@ -152,9 +152,13 @@ IsDeviceSuitable(VkPhysicalDevice device,
   auto swap_chain_support = QuerySwapChainSupport(device, surface);
   bool swap_chain_adequate = !swap_chain_support.formats.empty() &&
                              !swap_chain_support.present_modes.empty();
+
+  VkPhysicalDeviceFeatures device_features = {};
+  vkGetPhysicalDeviceFeatures(device, &device_features);
+  bool features_supported = device_features.samplerAnisotropy == VK_TRUE;
   return queue_family_indices.IsComplete() &&
          CheckDeviceExtensionsSupport(device, required_extensions) &&
-         swap_chain_adequate;
+         swap_chain_adequate && features_supported;
 }
 
 VulkanContext::VulkanContext(LuminaRenderer *renderer, VkInstance instance_,
@@ -253,7 +257,7 @@ auto VulkanContext::Initialize() noexcept
   if (!create_swap_chain_result) {
     return std::unexpected(create_swap_chain_result.error());
   }
-  auto create_image_views_result = CreateImageViews();
+  auto create_image_views_result = CreateSwapChainImageViews();
   if (!create_image_views_result) {
     return std::unexpected(create_image_views_result.error());
   }
@@ -330,7 +334,7 @@ auto VulkanContext::ResetContext() noexcept -> void {
     }
   }
   swap_chain_image_ready_to_present_semaphores.clear();
-  DestroyImageViews();
+  DestroySwapChainImageViews();
   DestroySwapChain();
   if (device != VK_NULL_HANDLE) {
     vkDestroyDevice(device, nullptr);
@@ -353,7 +357,7 @@ auto VulkanContext::DestroySwapChain() noexcept -> void {
   }
 }
 
-auto VulkanContext::DestroyImageViews() noexcept -> void {
+auto VulkanContext::DestroySwapChainImageViews() noexcept -> void {
   for (auto &image_view : image_views) {
     if (image_view != VK_NULL_HANDLE) {
       vkDestroyImageView(device, image_view, nullptr);
@@ -368,14 +372,14 @@ auto VulkanContext::RecreateSwapChain() noexcept
   ASSERT(is_initialized, "Vulkan context is not initialized");
   ASSERT(device != VK_NULL_HANDLE, "Device is null");
   vkDeviceWaitIdle(device);
-  DestroyImageViews();
+  DestroySwapChainImageViews();
   DestroySwapChain();
   auto create_swap_chain_result = CreateSwapChain();
   if (!create_swap_chain_result) {
     return std::unexpected(create_swap_chain_result.error());
   }
 
-  auto create_image_views_result = CreateImageViews();
+  auto create_image_views_result = CreateSwapChainImageViews();
   if (!create_image_views_result) {
     return std::unexpected(create_image_views_result.error());
   }
@@ -431,7 +435,8 @@ auto VulkanContext::SelectPhysicalDevice() noexcept
   std::vector<VkPhysicalDevice> devices(device_count);
   vkEnumeratePhysicalDevices(instance, &device_count, devices.data());
 
-  std::multimap<u32, VkPhysicalDevice> candidate_devices;
+  std::multimap<u32, std::pair<VkPhysicalDevice, VkPhysicalDeviceProperties>>
+      candidate_devices;
   for (const auto &device : devices) {
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(device, &device_properties);
@@ -439,7 +444,7 @@ auto VulkanContext::SelectPhysicalDevice() noexcept
     if (IsDeviceSuitable(device, device_properties, surface,
                          required_extensions)) {
       auto device_score = CalculateDeviceScore(device_properties);
-      candidate_devices.insert({device_score, device});
+      candidate_devices.insert({device_score, {device, device_properties}});
     }
   }
 
@@ -448,7 +453,8 @@ auto VulkanContext::SelectPhysicalDevice() noexcept
         VkInitializationError{.message = "No suitable physical device found"});
   }
 
-  physical_device = candidate_devices.rbegin()->second;
+  physical_device = candidate_devices.rbegin()->second.first;
+  physical_device_properties = candidate_devices.rbegin()->second.second;
   return std::expected<void, VkInitializationError>{};
 }
 
@@ -481,6 +487,7 @@ auto VulkanContext::CreateLogicalDevice() noexcept
   dynamic_rendering_feature.dynamicRendering = VK_TRUE;
 
   VkPhysicalDeviceFeatures device_features = {};
+  device_features.samplerAnisotropy = VK_TRUE;
 
   VkDeviceCreateInfo device_create_info = {
       .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -581,41 +588,53 @@ auto VulkanContext::CreateSwapChain() noexcept
   return std::expected<void, VkInitializationError>{};
 }
 
-auto VulkanContext::CreateImageViews() noexcept
+auto VulkanContext::CreateSwapChainImageViews() noexcept
     -> std::expected<void, VkInitializationError> {
   image_views.resize(swap_chain_images.size());
   for (size_t i = 0; i < swap_chain_images.size(); i++) {
-    VkImageViewCreateInfo image_view_create_info = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .image = swap_chain_images[i],
-
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = swap_chain_image_format,
-        .components =
-            {
-                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-            },
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-    };
-    if (vkCreateImageView(device, &image_view_create_info, nullptr,
-                          &image_views[i]) != VK_SUCCESS) {
-      return std::unexpected(
-          VkInitializationError{.message = "Failed to create image view"});
+    auto create_image_view_result =
+        CreateImageView(swap_chain_images[i], swap_chain_image_format);
+    if (!create_image_view_result) {
+      return std::unexpected(create_image_view_result.error());
     }
+    image_views[i] = create_image_view_result.value();
   }
   return std::expected<void, VkInitializationError>{};
+}
+
+auto VulkanContext::CreateImageView(VkImage &image, VkFormat format)
+    -> std::expected<VkImageView, VkInitializationError> {
+  VkImageViewCreateInfo image_view_create_info = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .pNext = nullptr,
+      .flags = 0,
+      .image = image,
+
+      .viewType = VK_IMAGE_VIEW_TYPE_2D,
+      .format = format,
+      .components =
+          {
+              .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+              .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+              .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+              .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+          },
+      .subresourceRange =
+          {
+              .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+              .baseMipLevel = 0,
+              .levelCount = 1,
+              .baseArrayLayer = 0,
+              .layerCount = 1,
+          },
+  };
+  VkImageView image_view = VK_NULL_HANDLE;
+  if (vkCreateImageView(device, &image_view_create_info, nullptr,
+                        &image_view) != VK_SUCCESS) {
+    return std::unexpected(
+        VkInitializationError{.message = "Failed to create image view"});
+  }
+  return image_view;
 }
 
 auto VulkanContext::CreateCommandPool() noexcept

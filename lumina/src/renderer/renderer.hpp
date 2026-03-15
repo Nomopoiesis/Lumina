@@ -70,6 +70,11 @@ private:
   std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
   std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniform_buffers_memory{};
   std::array<void *, MAX_FRAMES_IN_FLIGHT> uniform_buffers_mapped{};
+
+  VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
+  VkImage texture_image = VK_NULL_HANDLE;
+  VkImageView texture_image_view = VK_NULL_HANDLE;
+  VkSampler texture_sampler = VK_NULL_HANDLE;
 };
 
 } // namespace lumina::renderer

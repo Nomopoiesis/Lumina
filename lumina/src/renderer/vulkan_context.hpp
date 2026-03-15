@@ -71,8 +71,16 @@ public:
   auto CreateCommandBuffer(VkCommandPool command_pool) const noexcept
       -> std::expected<VkCommandBuffer, VkInitializationError>;
 
+  auto CreateImageView(VkImage &image, VkFormat format)
+      -> std::expected<VkImageView, VkInitializationError>;
+
   auto RecreateSwapChain() noexcept
       -> std::expected<void, VkInitializationError>;
+
+  [[nodiscard]] auto GetPhysicalDeviceProperties() const noexcept
+      -> const VkPhysicalDeviceProperties & {
+    return physical_device_properties;
+  }
 
 private:
   auto SelectPhysicalDevice() noexcept
@@ -80,11 +88,11 @@ private:
   auto CreateLogicalDevice() noexcept
       -> std::expected<void, VkInitializationError>;
   auto CreateSwapChain() noexcept -> std::expected<void, VkInitializationError>;
-  auto CreateImageViews() noexcept
+  auto CreateSwapChainImageViews() noexcept
       -> std::expected<void, VkInitializationError>;
 
   auto DestroySwapChain() noexcept -> void;
-  auto DestroyImageViews() noexcept -> void;
+  auto DestroySwapChainImageViews() noexcept -> void;
 
   LuminaRenderer *renderer = nullptr;
 
@@ -96,6 +104,7 @@ private:
   VkSurfaceKHR surface = VK_NULL_HANDLE;
 
   VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+  VkPhysicalDeviceProperties physical_device_properties;
   VkDevice device = VK_NULL_HANDLE;
   QueueFamilyIndices device_queue_family_indices;
   VkQueue graphics_queue = VK_NULL_HANDLE;
