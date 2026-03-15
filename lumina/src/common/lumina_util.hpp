@@ -42,6 +42,11 @@ template <typename T, std::size_t N>
   return static_cast<i32>(value);
 }
 
+[[nodiscard]] constexpr auto SafeI64ToU64(i64 value) noexcept -> u64 {
+  ASSERT(value >= 0, "Value is negative");
+  return static_cast<u64>(value);
+}
+
 [[nodiscard]] constexpr auto SafeU32ToI32(u32 value) noexcept -> i32 {
   ASSERT(value <= 0x7FFFFFFFU, "Value is too large to convert to i32");
   return static_cast<i32>(value);

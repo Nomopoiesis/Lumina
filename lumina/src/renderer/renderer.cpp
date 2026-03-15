@@ -1512,9 +1512,9 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
 
   VkViewport viewport = {
       .x = 0.0F,
-      .y = 0.0F,
+      .y = static_cast<f32>(swap_chain_image_extent.height),
       .width = static_cast<f32>(swap_chain_image_extent.width),
-      .height = static_cast<f32>(swap_chain_image_extent.height),
+      .height = -static_cast<f32>(swap_chain_image_extent.height),
       .minDepth = 0.0F,
       .maxDepth = 1.0F,
   };
