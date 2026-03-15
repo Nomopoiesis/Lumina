@@ -2,7 +2,8 @@ add_library(lumina_renderer STATIC)
 
 target_include_directories(
   lumina_renderer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                         $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>)
+                         $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>
+                         ${CMAKE_SOURCE_DIR}/lumina/data/shaders/generated)
 
 target_sources(
   lumina_renderer
@@ -12,7 +13,8 @@ target_sources(
           command_context.cpp
           vertex_layout.cpp
           vertex_serializer.cpp
-          shaders/shader_module_cache.cpp)
+          shaders/shader_module_cache.cpp
+          shaders/shader_interface.cpp)
 
 target_link_libraries(lumina_renderer
                       PRIVATE lumina_common lumina_common_terminate lumina_stb)

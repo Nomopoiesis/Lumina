@@ -7,6 +7,8 @@
 #include "core/lumina_engine.hpp"
 #include "graphics_pipeline.hpp"
 #include "shaders/shader_module_cache.hpp"
+#include "standard_lit.frag.gen.hpp"
+#include "standard_lit.vert.gen.hpp"
 #include "vertex_layout.hpp"
 #include "vertex_serializer.hpp"
 
@@ -29,45 +31,6 @@ namespace lumina::renderer {
 
 using namespace lumina::common::data_structures;
 
-static auto
-CreateDescriptorSetLayout(VulkanContext &vulkan_context,
-                          VkDescriptorSetLayout &descriptor_set_layout)
-    -> bool {
-  VkDescriptorSetLayoutBinding ubo_layout_binding = {
-      .binding = 0,
-      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-      .pImmutableSamplers = nullptr,
-  };
-
-  VkDescriptorSetLayoutBinding sampler_layout_binding = {
-      .binding = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-      .pImmutableSamplers = nullptr,
-  };
-
-  std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
-      ubo_layout_binding, sampler_layout_binding};
-
-  VkDescriptorSetLayoutCreateInfo layout_info = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .bindingCount = static_cast<u32>(bindings.size()),
-      .pBindings = bindings.data(),
-  };
-
-  if (vkCreateDescriptorSetLayout(vulkan_context.GetDevice(), &layout_info,
-                                  nullptr,
-                                  &descriptor_set_layout) != VK_SUCCESS) {
-    LOG_ERROR("Failed to create descriptor set layout");
-    return false;
-  }
-  return true;
-}
 
 static auto FindMemoryType(VulkanContext &vulkan_context, u32 type_filter,
                            VkMemoryPropertyFlags properties) -> u32 {
@@ -750,11 +713,6 @@ LuminaRenderer::~LuminaRenderer() noexcept {
                             nullptr);
   }
 
-  if (descriptor_set_layout != VK_NULL_HANDLE) {
-    vkDestroyDescriptorSetLayout(vulkan_context.GetDevice(),
-                                 descriptor_set_layout, nullptr);
-  }
-
   if (command_pool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(vulkan_context.GetDevice(), command_pool, nullptr);
   }
@@ -767,10 +725,6 @@ LuminaRenderer::~LuminaRenderer() noexcept {
     }
   });
 
-  if (pipeline_layout != VK_NULL_HANDLE) {
-    vkDestroyPipelineLayout(vulkan_context.GetDevice(), pipeline_layout,
-                            nullptr);
-  }
 }
 
 auto LuminaRenderer::AcquireFrameContextForUpdate() -> void {
@@ -944,15 +898,16 @@ auto LuminaRenderer::Initialize() -> void {
   }
   command_pool = command_pool_result.value();
 
-  auto desc_result =
-      CreateDescriptorSetLayout(vulkan_context, descriptor_set_layout);
-  ASSERT(desc_result, "Failed to create descriptor set layout");
-
-  if (!CreatePipelineLayout()) {
-    LOG_CRITICAL("Failed to create pipeline layout: {}",
-                 CreatePipelineLayout().error().message);
+  auto shader_interface_result = ShaderInterface::Create(
+      vulkan_context.GetDevice(),
+      lumina::shaders::standard_lit::vert::kLayout,
+      lumina::shaders::standard_lit::frag::kLayout);
+  if (!shader_interface_result) {
+    LOG_CRITICAL("Failed to create shader interface: {}",
+                 shader_interface_result.error().message);
     LUMINA_TERMINATE();
   }
+  shader_interface = std::move(shader_interface_result.value());
 
   auto depth_result = CreateDepthResources(
       vulkan_context, command_pool, depth_image, depth_image_view,
@@ -995,10 +950,11 @@ auto LuminaRenderer::Initialize() -> void {
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
     uniform_buffers[i] = frame_contexts[i]->GetUniformBuffer().buffer;
   }
+  auto *dsl = shader_interface.GetDescriptorSetLayout(0);
   auto desc_sets_result = CreateDescriptorSets(
       vulkan_context, descriptor_pool, MAX_FRAMES_IN_FLIGHT,
       uniform_buffers.data(), texture_sampler, texture_image_view,
-      descriptor_set_layout, descriptor_sets);
+      dsl, descriptor_sets);
   ASSERT(desc_sets_result, "Failed to create descriptor sets");
 
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
@@ -1101,33 +1057,6 @@ auto LuminaRenderer::DrawFrame() -> void {
   current_frame_index = (current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-auto LuminaRenderer::CreatePipelineLayout()
-    -> std::expected<void, VkInitializationError> {
-  VkPushConstantRange range = {
-      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-      .offset = 0,
-      .size = sizeof(math::Mat4),
-  };
-
-  VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .setLayoutCount = 1,
-      .pSetLayouts = &descriptor_set_layout,
-      .pushConstantRangeCount = 1,
-      .pPushConstantRanges = &range,
-  };
-
-  if (vkCreatePipelineLayout(vulkan_context.GetDevice(),
-                             &pipeline_layout_create_info, nullptr,
-                             &pipeline_layout) != VK_SUCCESS) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to create pipeline layout"});
-  }
-
-  return std::expected<void, VkInitializationError>{};
-}
 
 static auto ToVkFormat(core::ElementType element_type) -> VkFormat {
   switch (element_type) {
@@ -1346,7 +1275,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       .pDepthStencilState = &depth_stencil_state_create_info,
       .pColorBlendState = &color_blend_state_create_info,
       .pDynamicState = &dynamic_state_create_info,
-      .layout = pipeline_layout,
+      .layout = shader_interface.GetPipelineLayout(),
       .renderPass = VK_NULL_HANDLE,
       .subpass = 0,
       .basePipelineHandle = VK_NULL_HANDLE,
@@ -1496,7 +1425,7 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipeline_layout, 0, 1,
+                          shader_interface.GetPipelineLayout(), 0, 1,
                           &descriptor_sets[current_frame_index], 0, nullptr);
   for (const auto &draw_mesh_info : frame_context.render_draw_list) {
     auto handle = draw_mesh_info.render_mesh_handle;
@@ -1517,7 +1446,7 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
                            &render_mesh.vertex_streams[0].buffer, offsets);
     vkCmdBindIndexBuffer(command_buffer, render_mesh.index_buffer, 0,
                          VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(command_buffer, pipeline_layout,
+    vkCmdPushConstants(command_buffer, shader_interface.GetPipelineLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
                        &model);
     vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh.index_count),

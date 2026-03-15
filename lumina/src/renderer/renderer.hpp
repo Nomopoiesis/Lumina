@@ -5,6 +5,7 @@
 #include "command_context.hpp"
 #include "frame_context.hpp"
 #include "graphics_pipeline.hpp"
+#include "shaders/shader_interface.hpp"
 #include "vulkan_context.hpp"
 
 #include "core/static_mesh.hpp"
@@ -91,7 +92,6 @@ private:
 
   auto PollAndExecuteCommandContexts() -> void;
 
-  auto CreatePipelineLayout() -> std::expected<void, VkInitializationError>;
 
   auto RecordCommandBuffer(FrameContext &frame_context,
                            u32 image_index) noexcept
@@ -110,8 +110,7 @@ private:
   VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> descriptor_sets;
 
-  VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
-  VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+  ShaderInterface shader_interface;
 
   VkCommandPool command_pool = VK_NULL_HANDLE;
 
