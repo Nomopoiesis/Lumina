@@ -3,10 +3,10 @@
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
 #include "frame_context.hpp"
-#include "math/vector.hpp"
 #include "vulkan_context.hpp"
 
-#include <array>
+#include <semaphore>
+#include <thread>
 #include <vector>
 
 namespace lumina::renderer {
@@ -27,6 +27,8 @@ public:
 
   auto DrawFrame() -> void;
 
+  auto Shutdown() -> void;
+
   auto DeviceWaitIdle() -> void;
 
   auto SetFramebufferResized(bool resized) -> void {
@@ -36,7 +38,25 @@ public:
     return is_framebuffer_resized;
   }
 
+  // Acquire a frame context for update (API exposed to the engine to coordinate
+  // the frame update)
+  auto AcquireFrameContextForUpdate() -> void;
+  // Release a frame context for update (API exposed to the engine to coordinate
+  // the frame update)
+  auto ReleaseFrameContextForUpdate() -> void;
+
+  [[nodiscard]] auto GetFrameContextForUpdate() noexcept -> FrameContext * {
+    return frame_context_for_update;
+  }
+
 private:
+  auto RenderThread() -> void;
+
+  auto AcquireFrameContextForRender() -> void;
+  auto ReleaseFrameContextForRender() -> void;
+
+  auto TryReclaimFrameContexts() -> void;
+
   auto CreatePipelineLayout() -> std::expected<void, VkInitializationError>;
   auto CreatePipeline() -> std::expected<void, VkInitializationError>;
 
@@ -44,12 +64,15 @@ private:
                            u32 image_index) noexcept
       -> std::expected<void, VkInitializationError>;
 
-  static constexpr size_t MAX_FRAMES_IN_FLIGHT = 2;
   size_t current_frame_index = 0;
 
   bool is_framebuffer_resized = false;
 
+  bool shutdown_requested = false;
+
   VulkanContext vulkan_context;
+
+  std::thread render_thread;
 
   VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> descriptor_sets;
@@ -60,16 +83,19 @@ private:
   VkPipeline pipeline = VK_NULL_HANDLE;
   VkCommandPool command_pool = VK_NULL_HANDLE;
 
+  std::counting_semaphore<MAX_FRAMES_IN_FLIGHT> frames_available_for_update{
+      MAX_FRAMES_IN_FLIGHT};
+  std::counting_semaphore<MAX_FRAMES_IN_FLIGHT> frames_available_for_render{0};
+
+  FrameContext *frame_context_for_update = nullptr;
+  FrameContext *frame_context_for_render = nullptr;
+
   std::vector<FrameContext> frame_contexts;
 
   VkDeviceMemory vertex_buffer_memory = VK_NULL_HANDLE;
   VkBuffer vertex_buffer = VK_NULL_HANDLE;
   VkDeviceMemory index_buffer_memory = VK_NULL_HANDLE;
   VkBuffer index_buffer = VK_NULL_HANDLE;
-
-  std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
-  std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniform_buffers_memory{};
-  std::array<void *, MAX_FRAMES_IN_FLIGHT> uniform_buffers_mapped{};
 
   VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
   VkImage texture_image = VK_NULL_HANDLE;

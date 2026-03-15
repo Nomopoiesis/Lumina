@@ -4,7 +4,10 @@
 
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
+#include "common/timer.hpp"
 #include "platform/common/vulkan/vulkan_init_result.hpp"
+
+#include "math/matrix.hpp"
 
 #include "camera_movement_controller.hpp"
 #include "input/input_dispatcher.hpp"
@@ -30,6 +33,12 @@ struct LuminaInitializeInfo {
 struct FrameTimeInfo {
   f64 delta_time;
   f64 total_time;
+};
+
+struct UniformBufferObject {
+  alignas(16) math::Mat4 model;
+  alignas(16) math::Mat4 view;
+  alignas(16) math::Mat4 proj;
 };
 
 class LuminaEngine {
@@ -99,8 +108,12 @@ public:
 
   [[nodiscard]] auto GetCurrentWorld() -> World & { return *current_world; }
 
+  // Prepares the engine state for the next frame
+  auto BeginFrame(Timer &timer) -> void;
   // This is the main frame executor
-  auto ExecuteFrame(f64 delta_time) -> void;
+  auto ExecuteFrame() -> void;
+  // Ends engine frame simulation and releases the frame for rendering
+  auto EndFrame() -> void;
 
 private:
   LuminaEngine() noexcept = default;

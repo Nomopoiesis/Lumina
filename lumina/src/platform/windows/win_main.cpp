@@ -75,11 +75,12 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   Timer timer;
   timer.Reset();
   while (window.IsRunning()) {
-    auto delta_time = timer.Tick();
     engine.GetInputState().NewFrame();
     window.ProcessMessages();
     window.ProcessMouseMovement();
-    engine.ExecuteFrame(delta_time);
+    engine.BeginFrame(timer);
+    engine.ExecuteFrame();
+    engine.EndFrame();
   }
 
   LOG_TRACE("Shutting down Lumina engine...");

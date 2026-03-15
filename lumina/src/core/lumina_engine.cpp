@@ -1,7 +1,5 @@
 #include "lumina_engine.hpp"
 
-#include <algorithm>
-
 #include "common/logger/logger.hpp"
 
 #include "basic_geometry.hpp"
@@ -9,6 +7,7 @@
 #include "components/static_mesh_component.hpp"
 #include "components/transform.hpp"
 #include "input/input_action.hpp"
+#include "math/basic.hpp"
 
 namespace lumina::core {
 
@@ -86,6 +85,20 @@ static auto TestJobSystem() -> void {
   job_manager.Shutdown();
 }
 
+static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
+  auto &world = core::LuminaEngine::Instance().GetCurrentWorld();
+  auto camera_id = world.GetActiveCamera();
+  auto transform = world.GetComponent<core::components::Transform>(camera_id);
+  auto camera = world.GetComponent<core::components::Camera>(camera_id);
+  UniformBufferObject ubo = {};
+  ubo.model = math::Mat4::Identity();
+  ubo.view = CalculateViewMatrix(transform);
+  ubo.proj = camera.ToProjectionMatrix();
+  ubo.proj[1][1] *= -1;
+  memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
+  return true;
+}
+
 static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
   input_action_map.BindAction(ActionID(std::string_view("MoveForward")),
                               KeyInputBinding(KeyCode::W, KeyState::Held));
@@ -158,20 +171,43 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
 
 auto LuminaEngine::Shutdown() -> void {
   auto &instance = GetStaticInstance();
-  instance.current_world.reset();
+  instance.renderer->Shutdown();
   instance.renderer->DeviceWaitIdle();
   instance.job_manager.reset();
   instance.renderer.reset();
+  instance.current_world.reset();
   instance.is_initialized = false;
 }
 
-auto LuminaEngine::ExecuteFrame(f64 delta_time) -> void {
+auto LuminaEngine::BeginFrame(Timer &timer) -> void {
+  renderer->AcquireFrameContextForUpdate();
+  auto delta_time = timer.Tick();
   // Clamp the delta time to 0.1 seconds to prevent large jumps in time
-  delta_time = std::clamp<f64>(delta_time, 0.0, 0.1);
+  delta_time = math::Clamp(delta_time, 0.0, 0.1);
   frame_time_info.delta_time = delta_time;
   frame_time_info.total_time += delta_time;
+}
+
+auto LuminaEngine::EndFrame() -> void {
+  renderer->ReleaseFrameContextForUpdate();
+}
+
+auto LuminaEngine::ExecuteFrame() -> void {
+  auto *frame_sync_counter = job_manager->AllocateCounter(1);
+  auto *job = job_manager->AllocateJob();
+  job->execute = [](void *data) {
+    auto *engine = static_cast<LuminaEngine *>(data);
+    UpdateUniformBuffer(engine->renderer->GetFrameContextForUpdate()
+                            ->GetUniformBuffer()
+                            .mapped);
+  };
+  job->data = this;
+  job->signal_counter = frame_sync_counter;
+  job_manager->SubmitJob(job);
   input_dispatcher.Dispatch(input_state);
-  renderer->DrawFrame();
+  job_manager->WaitForCounter(frame_sync_counter);
+  job_manager->ReleaseCounter(frame_sync_counter);
+  job_manager->ReleaseJob(job);
 }
 
 } // namespace lumina::core
