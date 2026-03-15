@@ -20,21 +20,21 @@ struct Transform {
 };
 
 inline auto Transform::Forward() const -> math::Vec3 {
-  auto rotation_quat = math::Quaternion::FromEulerAngles(rotation);
+  auto rotation_quat = math::Quaternion::FromEulerAnglesDeg(rotation);
   return math::Normalize(math::Dot(EngineCoordinates::FORWARD,
                                    rotation_quat.CreateRotationMatrix()));
 }
 
 inline auto Transform::Right() const -> math::Vec3 {
-  auto rotation_quat = math::Quaternion::FromEulerAngles(rotation);
-  return math::Normalize(math::Dot(EngineCoordinates::RIGHT,
-                                   rotation_quat.CreateRotationMatrix()));
+  auto forward = Forward();
+  auto up = EngineCoordinates::UP;
+  return math::Normalize(math::Cross(forward, up));
 }
 
 inline auto Transform::Up() const -> math::Vec3 {
-  auto rotation_quat = math::Quaternion::FromEulerAngles(rotation);
-  return math::Normalize(
-      math::Dot(EngineCoordinates::UP, rotation_quat.CreateRotationMatrix()));
+  auto forward = Forward();
+  auto right = Right();
+  return math::Normalize(math::Cross(right, forward));
 }
 
 enum class ProjectionType : u8 { Perspective = 0, Orthographic = 1 };

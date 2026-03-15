@@ -83,7 +83,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   // TestJobSystem();
   Transform transform = {
       .position = {2.0F, 2.0F, 2.0F},
-      .rotation = {-45.0F, 45.0F, 0.0F},
+      .rotation = {-35.0F, 45.0F, 0.0F},
       .scale = {1.0F, 1.0F, 1.0F},
   };
   CameraSettings camera_settings = {
