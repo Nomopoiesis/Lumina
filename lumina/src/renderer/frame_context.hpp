@@ -3,10 +3,12 @@
 #include <atomic>
 #include <vulkan/vulkan.h>
 
+#include "math/matrix.hpp"
 #include "render_mesh.hpp"
 #include "vulkan_context.hpp"
 
 #include <memory>
+#include <vector>
 
 namespace lumina::renderer {
 
@@ -22,6 +24,11 @@ enum class FrameContextPipelineState : u8 {
   UPDATE_COMPLETE,
   RENDER,
   RENDER_COMPLETE,
+};
+
+struct DrawMeshInfo {
+  RenderMeshHandle render_mesh_handle;
+  math::Mat4 model;
 };
 
 struct FrameContextUniformBuffer {
@@ -83,7 +90,7 @@ public:
     return uniform_buffer;
   }
 
-  RenderMeshHandle render_mesh_handle;
+  std::vector<DrawMeshInfo> render_draw_list;
 
 private:
   VulkanContext &vulkan_context;

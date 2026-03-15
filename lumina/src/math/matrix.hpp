@@ -156,4 +156,20 @@ public:
   }
 };
 
+inline auto TranslationMatrix(const Vec3 &translation) -> Mat4 {
+  auto mat = Mat4::Identity();
+  mat[3] = Vec4(translation.x, translation.y, translation.z, 1.0F);
+  return mat;
+}
+
+inline auto RotationMatrix(const Vec3 &rotation) -> Mat4 {
+  auto mat = Mat4::Identity();
+  return mat;
+}
+
+inline auto ScaleMatrix(const Vec3 &scale) -> Mat4 {
+  auto mat = Mat4::Identity();
+  return mat;
+}
+
 } // namespace lumina::math

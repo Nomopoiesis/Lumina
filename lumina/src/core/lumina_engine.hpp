@@ -35,7 +35,6 @@ struct FrameTimeInfo {
 };
 
 struct UniformBufferObject {
-  alignas(16) math::Mat4 model;
   alignas(16) math::Mat4 view;
   alignas(16) math::Mat4 proj;
 };
@@ -117,8 +116,6 @@ public:
   auto ExecuteFrame() -> void;
   // Ends engine frame simulation and releases the frame for rendering
   auto EndFrame() -> void;
-
-  EntityID tmp_entity_id = INVALID_ENTITY_ID;
 
 private:
   LuminaEngine() noexcept = default;

@@ -23,6 +23,9 @@ public:
   template <typename T>
   auto SetComponent(EntityID id, const T &component) -> void;
 
+  template <typename T, typename Func>
+  auto ForEachComponent(Func &&func) -> void;
+
   auto SetActiveCamera(EntityID id) -> void;
 
   [[nodiscard]] auto GetActiveCamera() -> EntityID;
@@ -54,6 +57,11 @@ template <typename T>
 auto World::GetComponentStorage() -> components::ComponentStorage<T> * {
   static components::ComponentStorage<T> storage;
   return &storage;
+}
+
+template <typename T, typename Func>
+auto World::ForEachComponent(Func &&func) -> void {
+  GetComponentStorage<T>()->ForEach(std::forward<Func>(func));
 }
 
 } // namespace lumina::core
