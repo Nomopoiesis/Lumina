@@ -7,6 +7,7 @@
 #include "core/lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
+#include "common/timer.hpp"
 #include "platform/common/platform_services.hpp"
 #include "win_platform_services.hpp"
 
@@ -70,9 +71,12 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   lumina::core::LuminaEngine::Initialize(init_info);
   auto &engine = lumina::core::LuminaEngine::Instance();
 
+  Timer timer;
+  timer.Reset();
   while (window.IsRunning()) {
+    auto delta_time = timer.Tick();
     window.ProcessMessages();
-    engine.ExecuteFrame();
+    engine.ExecuteFrame(delta_time);
   }
 
   LOG_TRACE("Shutting down Lumina engine...");

@@ -24,6 +24,9 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     -Wno-c++98-compat
     -Wno-c++98-compat-pedantic
     -Wno-extra-semi-stmt
-    -Wno-switch-default)
+    -Wno-switch-default
+    -Wno-gnu-anonymous-struct
+    -Wno-unsafe-buffer-usage-in-libc-call
+    -Wno-nested-anon-types)
 
 endif()

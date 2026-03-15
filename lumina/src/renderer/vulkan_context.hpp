@@ -48,6 +48,8 @@ public:
       -> std::expected<VkFence, VkInitializationError>;
 
   [[nodiscard]] auto GetDevice() const noexcept -> const VkDevice &;
+  [[nodiscard]] auto GetPhysicalDevice() const noexcept
+      -> const VkPhysicalDevice &;
   [[nodiscard]] auto GetSwapChain() const noexcept -> const VkSwapchainKHR &;
   [[nodiscard]] auto GetSwapChainImage(u32 index) const noexcept
       -> const VkImage &;

@@ -273,6 +273,11 @@ auto VulkanContext::GetDevice() const noexcept -> const VkDevice & {
   return device;
 }
 
+auto VulkanContext::GetPhysicalDevice() const noexcept
+    -> const VkPhysicalDevice & {
+  return physical_device;
+}
+
 auto VulkanContext::GetSwapChain() const noexcept -> const VkSwapchainKHR & {
   return swap_chain;
 }

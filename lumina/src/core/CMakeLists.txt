@@ -1,6 +1,6 @@
 add_library(lumina_core STATIC)
 
-target_sources(lumina_core PRIVATE lumina_engine.cpp)
+target_sources(lumina_core PRIVATE camera.cpp lumina_engine.cpp)
 
 target_include_directories(
   lumina_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

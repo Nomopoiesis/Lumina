@@ -3,8 +3,10 @@
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
 #include "frame_context.hpp"
+#include "math/vector.hpp"
 #include "vulkan_context.hpp"
 
+#include <array>
 #include <vector>
 
 namespace lumina::renderer {
@@ -49,12 +51,25 @@ private:
 
   VulkanContext vulkan_context;
 
+  VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+  std::vector<VkDescriptorSet> descriptor_sets;
+
+  VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 
   VkPipeline pipeline = VK_NULL_HANDLE;
   VkCommandPool command_pool = VK_NULL_HANDLE;
 
   std::vector<FrameContext> frame_contexts;
+
+  VkDeviceMemory vertex_buffer_memory = VK_NULL_HANDLE;
+  VkBuffer vertex_buffer = VK_NULL_HANDLE;
+  VkDeviceMemory index_buffer_memory = VK_NULL_HANDLE;
+  VkBuffer index_buffer = VK_NULL_HANDLE;
+
+  std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
+  std::array<VkDeviceMemory, MAX_FRAMES_IN_FLIGHT> uniform_buffers_memory{};
+  std::array<void *, MAX_FRAMES_IN_FLIGHT> uniform_buffers_mapped{};
 };
 
 } // namespace lumina::renderer
