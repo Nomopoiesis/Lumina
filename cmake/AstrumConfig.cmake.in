@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Include the exported targets
+include("${CMAKE_CURRENT_LIST_DIR}/AstrumTargets.cmake")
+
+check_required_components(Astrum)
