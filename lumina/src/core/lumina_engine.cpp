@@ -13,78 +13,6 @@ namespace lumina::core {
 
 using namespace lumina::core::components;
 
-struct FibData {
-  int n;
-  u64 *result;
-};
-
-static void FibJob(void *parameter) {
-  auto *data = static_cast<FibData *>(parameter);
-
-  if (data->n <= 1) {
-    *data->result = data->n;
-    return;
-  }
-
-  u64 res1 = 0;
-  u64 res2 = 0;
-
-  auto *job_manager = job_system::JobManager::GetCurrent();
-  ASSERT(job_manager != nullptr, "Job manager is null");
-
-  // Create a counter initialized to 2 (waiting for two sub-jobs)
-  // 'this' refers to the JobManager instance
-  auto *counter = job_manager->AllocateCounter(2);
-
-  FibData d1 = {.n = data->n - 1, .result = &res1};
-  FibData d2 = {.n = data->n - 2, .result = &res2};
-
-  // Submit two sub-jobs that will signal 'counter' when done
-  auto *job1 = job_manager->AllocateJob();
-  ASSERT(job1 != nullptr, "Job1 is null");
-  job1->execute = FibJob;
-  job1->data = &d1;
-  job1->signal_counter = counter;
-  job_manager->SubmitJob(job1);
-  auto *job2 = job_manager->AllocateJob();
-  ASSERT(job2 != nullptr, "Job2 is null");
-  job2->execute = FibJob;
-  job2->data = &d2;
-  job2->signal_counter = counter;
-  job_manager->SubmitJob(job2);
-
-  // CRITICAL TEST: The fiber suspends here!
-  // The worker thread will go find other work while this waits.
-  job_manager->WaitForCounter(counter);
-  job_manager->ReleaseCounter(counter);
-  job_manager->ReleaseJob(job1);
-  job_manager->ReleaseJob(job2);
-
-  // Once we resume, we have the results
-  *data->result = res1 + res2;
-}
-
-static auto TestJobSystem() -> void {
-  job_system::JobManager job_manager;
-  job_system::JobManagerInitializeInfo initialize_info = {
-      .num_workers = 0, .fiber_pool_size = 1024};
-  job_manager.Initialize(initialize_info);
-
-  u64 final_result = 0;
-  FibData root_data = {.n = 13, .result = &final_result};
-  auto *sync_counter = job_manager.AllocateCounter(1);
-  auto *job = job_manager.AllocateJob();
-  job->execute = FibJob;
-  job->data = &root_data;
-  job->signal_counter = sync_counter;
-  job_manager.SubmitJob(job);
-  job_manager.WaitForCounter(sync_counter);
-  LOG_INFO("Final result: {}", final_result);
-  job_manager.ReleaseCounter(sync_counter);
-  job_manager.ReleaseJob(job);
-  job_manager.Shutdown();
-}
-
 static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
   auto &world = core::LuminaEngine::Instance().GetCurrentWorld();
   auto camera_id = world.GetActiveCamera();
@@ -166,6 +94,8 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   entity_id = world.CreateEntity();
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
+  instance.tmp_entity_id = entity_id;
+
   instance.is_initialized = true;
 }
 
@@ -193,8 +123,28 @@ auto LuminaEngine::EndFrame() -> void {
 }
 
 auto LuminaEngine::ExecuteFrame() -> void {
+  static bool init = true;
+  if (init) {
+    auto *job = job_manager->AcquireJob();
+    auto static_mesh_handle =
+        current_world->GetComponent<StaticMeshComponent>(tmp_entity_id)
+            .GetStaticMeshHandle();
+    job->execute = [static_mesh_handle](void *data) -> void {
+      auto *engine = static_cast<LuminaEngine *>(data);
+      auto mesh = engine->static_mesh_manager.Get(static_mesh_handle);
+      ASSERT(mesh.has_value(), "Static mesh not found");
+      auto &renderer = engine->GetRenderer();
+      auto render_mesh_handle = renderer.CreateRenderMesh(mesh.value());
+      mesh.value().render_mesh_handle = render_mesh_handle;
+      engine->static_mesh_manager.Set(static_mesh_handle,
+                                      std::move(mesh.value()));
+    };
+    job->data = this;
+    job_manager->SubmitJob(job);
+    init = false;
+  }
   auto *frame_sync_counter = job_manager->AllocateCounter(1);
-  auto *job = job_manager->AllocateJob();
+  auto *job = job_manager->AcquireJob();
   job->execute = [](void *data) {
     auto *engine = static_cast<LuminaEngine *>(data);
     UpdateUniformBuffer(engine->renderer->GetFrameContextForUpdate()
@@ -204,10 +154,16 @@ auto LuminaEngine::ExecuteFrame() -> void {
   job->data = this;
   job->signal_counter = frame_sync_counter;
   job_manager->SubmitJob(job);
+  auto static_mesh_component =
+      current_world->GetComponent<StaticMeshComponent>(tmp_entity_id);
+  auto static_mesh_handle = static_mesh_component.GetStaticMeshHandle();
+  auto static_mesh = static_mesh_manager.Get(static_mesh_handle);
+  ASSERT(static_mesh.has_value(), "Static mesh not found");
+  renderer->GetFrameContextForUpdate()->render_mesh_handle =
+      static_mesh->render_mesh_handle;
   input_dispatcher.Dispatch(input_state);
   job_manager->WaitForCounter(frame_sync_counter);
   job_manager->ReleaseCounter(frame_sync_counter);
-  job_manager->ReleaseJob(job);
 }
 
 } // namespace lumina::core

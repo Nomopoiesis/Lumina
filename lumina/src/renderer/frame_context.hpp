@@ -3,9 +3,10 @@
 #include <atomic>
 #include <vulkan/vulkan.h>
 
+#include "render_mesh.hpp"
 #include "vulkan_context.hpp"
 
-#include <array>
+#include <memory>
 
 namespace lumina::renderer {
 
@@ -45,14 +46,15 @@ public:
       : vulkan_context(vulkan_context) {}
   ~FrameContext() noexcept;
 
-  FrameContext(FrameContext &&other) noexcept;
-  auto operator=(FrameContext &&other) noexcept -> FrameContext &;
+  FrameContext(FrameContext &&other) noexcept = delete;
+  auto operator=(FrameContext &&other) noexcept -> FrameContext & = delete;
 
   FrameContext(const FrameContext &) = delete;
   auto operator=(const FrameContext &) -> FrameContext & = delete;
 
   static auto Create(VulkanContext &vulkan_context, VkCommandPool command_pool)
-      -> std::expected<FrameContext, FrameContextCreationError>;
+      -> std::expected<std::unique_ptr<FrameContext>,
+                       FrameContextCreationError>;
 
   [[nodiscard]] auto GetCommandBuffer() const noexcept
       -> const VkCommandBuffer & {
@@ -80,6 +82,8 @@ public:
   auto GetUniformBuffer() noexcept -> FrameContextUniformBuffer & {
     return uniform_buffer;
   }
+
+  RenderMeshHandle render_mesh_handle;
 
 private:
   VulkanContext &vulkan_context;

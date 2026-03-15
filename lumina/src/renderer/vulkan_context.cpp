@@ -442,6 +442,13 @@ auto VulkanContext::CreateFence(bool signaled) const noexcept
   return fence;
 }
 
+auto VulkanContext::DestroyFence(VkFence &fence) const noexcept -> void {
+  if (fence != VK_NULL_HANDLE) {
+    vkDestroyFence(device, fence, nullptr);
+    fence = VK_NULL_HANDLE;
+  }
+}
+
 auto VulkanContext::SelectPhysicalDevice() noexcept
     -> std::expected<void, VkInitializationError> {
   u32 device_count = 0;

@@ -1,10 +1,13 @@
 #include "renderer.hpp"
 
+#include "common/data_structures/data_buffer.hpp"
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
 #include "common/lumina_terminate.hpp"
 #include "core/lumina_engine.hpp"
 #include "shaders/shader_module_cache.hpp"
+#include "vertex_layout.hpp"
+#include "vertex_serializer.hpp"
 
 #include "math/vector.hpp"
 #include <vulkan/vk_enum_string_helper.h>
@@ -22,6 +25,8 @@
 #undef STB_IMAGE_IMPLEMENTATION
 
 namespace lumina::renderer {
+
+using namespace lumina::common::data_structures;
 
 struct Vertex {
   math::Vec3 position;
@@ -89,7 +94,9 @@ static const auto vertices = std::vector<Vertex>{
      .tex_coord = {1.0F, 0.0F}},
 };
 
-const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
+const std::vector<u16> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
+
+const std::vector<u16> indices2 = {0, 1, 2, 2, 3, 0};
 
 static auto
 CreateDescriptorSetLayout(VulkanContext &vulkan_context,
@@ -341,16 +348,18 @@ static auto TransitionImageLayout(VulkanContext &vulkan_context,
   return EndCommandBuffer(vulkan_context, command_pool, command_buffer);
 }
 
-static auto DeviceCopyBuffer(VulkanContext &vulkan_context,
-                             VkCommandPool &command_pool, VkBuffer src_buffer,
-                             VkBuffer dst_buffer, VkDeviceSize size) -> bool {
+static auto RecordDeviceCopyBufferCommands(VkCommandBuffer command_buffer,
+                                           VkBuffer src_buffer,
+                                           VkBuffer dst_buffer,
+                                           VkDeviceSize size) -> bool {
 
-  auto command_buffer_result = BeginCommandBuffer(vulkan_context, command_pool);
+  /*auto command_buffer_result =
+      BeginCommandBuffer(vulkan_context, command_pool);
   if (!command_buffer_result) {
     return false;
   }
   auto *command_buffer = command_buffer_result.value();
-
+*/
   VkBufferCopy copy_region = {
       .srcOffset = 0,
       .dstOffset = 0,
@@ -358,7 +367,8 @@ static auto DeviceCopyBuffer(VulkanContext &vulkan_context,
   };
   vkCmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, &copy_region);
 
-  return EndCommandBuffer(vulkan_context, command_pool, command_buffer);
+  // return EndCommandBuffer(vulkan_context, command_pool, command_buffer);
+  return true;
 }
 
 static auto CreateBuffer(VulkanContext &vulkan_context, VkDeviceSize size,
@@ -392,83 +402,88 @@ static auto CreateBuffer(VulkanContext &vulkan_context, VkDeviceSize size,
   return DeviceAllocateMemory(vulkan_context, memory, buffer, mem_requirements);
 }
 
-static auto CreateVertexBuffer(VulkanContext &vulkan_context,
-                               VkCommandPool &command_pool,
-                               VkDeviceMemory &memory, VkBuffer &buffer)
-    -> bool {
-  VkDeviceSize size = sizeof(Vertex) * vertices.size();
+struct VulkanBufferResources {
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+};
 
-  VkBuffer staging_buffer = VK_NULL_HANDLE;
-  VkDeviceMemory staging_buffer_memory = VK_NULL_HANDLE;
+static auto RecordVertexBufferUploadCommands(VulkanContext &vulkan_context,
+                                             VkCommandBuffer command_buffer,
+                                             DataBufferView data_view)
+    -> std::tuple<bool, VulkanBufferResources, VulkanBufferResources> {
+  VkDeviceSize size = data_view.Size();
+
+  VulkanBufferResources staging_buffer;
   if (!CreateBuffer(vulkan_context, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    staging_buffer_memory, staging_buffer)) {
+                    staging_buffer.memory, staging_buffer.buffer)) {
+    // TODO: Handle error gracefully
     LOG_CRITICAL("Failed to create vertex staging buffer");
     LUMINA_TERMINATE();
   }
 
-  void *data = nullptr;
-  vkMapMemory(vulkan_context.GetDevice(), staging_buffer_memory, 0, size, 0,
-              &data);
-  memcpy(data, vertices.data(), size);
-  vkUnmapMemory(vulkan_context.GetDevice(), staging_buffer_memory);
+  void *mapped_data = nullptr;
+  vkMapMemory(vulkan_context.GetDevice(), staging_buffer.memory, 0, size, 0,
+              &mapped_data);
+  memcpy(mapped_data, data_view.Data(), size);
+  vkUnmapMemory(vulkan_context.GetDevice(), staging_buffer.memory);
 
+  VulkanBufferResources device_buffer;
   if (!CreateBuffer(vulkan_context, size,
                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory, buffer)) {
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_buffer.memory,
+                    device_buffer.buffer)) {
+    // TODO: Handle error gracefully
     LOG_CRITICAL("Failed to create vertex buffer");
     LUMINA_TERMINATE();
   }
-  auto copy_result = DeviceCopyBuffer(vulkan_context, command_pool,
-                                      staging_buffer, buffer, size);
+  auto copy_result = RecordDeviceCopyBufferCommands(
+      command_buffer, staging_buffer.buffer, device_buffer.buffer, size);
   ASSERT(copy_result, "Failed to copy buffer");
 
-  vkDestroyBuffer(vulkan_context.GetDevice(), staging_buffer, nullptr);
-  vkFreeMemory(vulkan_context.GetDevice(), staging_buffer_memory, nullptr);
-  return true;
+  return std::make_tuple(true, staging_buffer, device_buffer);
 }
 
-static auto CreateIndexBuffer(VulkanContext &vulkan_context,
-                              VkCommandPool &command_pool,
-                              VkDeviceMemory &memory, VkBuffer &buffer)
-    -> bool {
-  VkDeviceSize size = sizeof(uint16_t) * indices.size();
-  VkBuffer staging_buffer = VK_NULL_HANDLE;
-  VkDeviceMemory staging_buffer_memory = VK_NULL_HANDLE;
+static auto RecordIndexBufferUploadCommands(VulkanContext &vulkan_context,
+                                            VkCommandBuffer command_buffer,
+                                            DataBufferView data_view)
+    -> std::tuple<bool, VulkanBufferResources, VulkanBufferResources> {
+  VkDeviceSize size = data_view.Size();
+  VulkanBufferResources staging_buffer;
   if (!CreateBuffer(vulkan_context, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    staging_buffer_memory, staging_buffer)) {
+                    staging_buffer.memory, staging_buffer.buffer)) {
     LOG_CRITICAL("Failed to create index staging buffer");
     LUMINA_TERMINATE();
   }
 
-  void *data = nullptr;
-  vkMapMemory(vulkan_context.GetDevice(), staging_buffer_memory, 0, size, 0,
-              &data);
-  memcpy(data, indices.data(), size);
-  vkUnmapMemory(vulkan_context.GetDevice(), staging_buffer_memory);
+  void *mapped_data = nullptr;
+  vkMapMemory(vulkan_context.GetDevice(), staging_buffer.memory, 0, size, 0,
+              &mapped_data);
+  memcpy(mapped_data, data_view.Data(), size);
+  vkUnmapMemory(vulkan_context.GetDevice(), staging_buffer.memory);
 
+  VulkanBufferResources device_buffer;
   if (!CreateBuffer(vulkan_context, size,
                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory, buffer)) {
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, device_buffer.memory,
+                    device_buffer.buffer)) {
     LOG_CRITICAL("Failed to create index buffer");
     LUMINA_TERMINATE();
   }
-  auto copy_result = DeviceCopyBuffer(vulkan_context, command_pool,
-                                      staging_buffer, buffer, size);
+  auto copy_result = RecordDeviceCopyBufferCommands(
+      command_buffer, staging_buffer.buffer, device_buffer.buffer, size);
   ASSERT(copy_result, "Failed to copy buffer");
 
-  vkDestroyBuffer(vulkan_context.GetDevice(), staging_buffer, nullptr);
-  vkFreeMemory(vulkan_context.GetDevice(), staging_buffer_memory, nullptr);
-  return true;
+  return std::make_tuple(true, staging_buffer, device_buffer);
 }
 
 static auto CreateDescriptorPool(VulkanContext &vulkan_context,
@@ -773,6 +788,9 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   // are destroyed before the command pool.
   frame_contexts.clear();
 
+  render_mesh_manager.DestroyAll(
+      [this](RenderMeshHandle handle) -> void { DestroyRenderMesh(handle); });
+
   if (depth_image_view != VK_NULL_HANDLE) {
     vkDestroyImageView(vulkan_context.GetDevice(), depth_image_view, nullptr);
   }
@@ -806,22 +824,6 @@ LuminaRenderer::~LuminaRenderer() noexcept {
                                  descriptor_set_layout, nullptr);
   }
 
-  if (vertex_buffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(vulkan_context.GetDevice(), vertex_buffer, nullptr);
-  }
-
-  if (vertex_buffer_memory != VK_NULL_HANDLE) {
-    vkFreeMemory(vulkan_context.GetDevice(), vertex_buffer_memory, nullptr);
-  }
-
-  if (index_buffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(vulkan_context.GetDevice(), index_buffer, nullptr);
-  }
-
-  if (index_buffer_memory != VK_NULL_HANDLE) {
-    vkFreeMemory(vulkan_context.GetDevice(), index_buffer_memory, nullptr);
-  }
-
   if (command_pool != VK_NULL_HANDLE) {
     vkDestroyCommandPool(vulkan_context.GetDevice(), command_pool, nullptr);
   }
@@ -838,9 +840,9 @@ auto LuminaRenderer::AcquireFrameContextForUpdate() -> void {
   frames_available_for_update.acquire();
   for (auto &frame_context : frame_contexts) {
     FrameContextPipelineState expected = FrameContextPipelineState::IDLE;
-    if (frame_context.pipeline_state.compare_exchange_weak(
+    if (frame_context->pipeline_state.compare_exchange_weak(
             expected, FrameContextPipelineState::UPDATE)) {
-      frame_context_for_update = &frame_context;
+      frame_context_for_update = frame_context.get();
       break;
     }
   }
@@ -860,9 +862,9 @@ auto LuminaRenderer::AcquireFrameContextForRender() -> void {
   for (auto &frame_context : frame_contexts) {
     FrameContextPipelineState expected =
         FrameContextPipelineState::UPDATE_COMPLETE;
-    if (frame_context.pipeline_state.compare_exchange_weak(
+    if (frame_context->pipeline_state.compare_exchange_weak(
             expected, FrameContextPipelineState::RENDER)) {
-      frame_context_for_render = &frame_context;
+      frame_context_for_render = frame_context.get();
       break;
     }
   }
@@ -882,13 +884,13 @@ auto LuminaRenderer::TryReclaimFrameContexts() -> void {
   // First check fence status of all RENDER_COMPLETE frame contexts
   auto pending_completion = 0;
   for (auto &frame_context : frame_contexts) {
-    if (frame_context.pipeline_state.load() ==
+    if (frame_context->pipeline_state.load() ==
         FrameContextPipelineState::RENDER_COMPLETE) {
       auto status = vkGetFenceStatus(vulkan_context.GetDevice(),
-                                     frame_context.GetFrameBeginReadyFence());
+                                     frame_context->GetFrameBeginReadyFence());
       if (status == VK_SUCCESS) {
         // The fence is signaled, so the frame context is ready to be reused
-        frame_context.pipeline_state.store(FrameContextPipelineState::IDLE);
+        frame_context->pipeline_state.store(FrameContextPipelineState::IDLE);
         frames_available_for_update.release();
         return;
       } else {
@@ -905,9 +907,9 @@ auto LuminaRenderer::TryReclaimFrameContexts() -> void {
     auto ctx_idx = (current_frame_index - 1) % MAX_FRAMES_IN_FLIGHT;
     ASSERT(ctx_idx < frame_contexts.size(), "Context index out of bounds");
     vkWaitForFences(vulkan_context.GetDevice(), 1,
-                    &frame_contexts[ctx_idx].GetFrameBeginReadyFence(), VK_TRUE,
-                    UINT64_MAX);
-    frame_contexts[ctx_idx].pipeline_state.store(
+                    &frame_contexts[ctx_idx]->GetFrameBeginReadyFence(),
+                    VK_TRUE, UINT64_MAX);
+    frame_contexts[ctx_idx]->pipeline_state.store(
         FrameContextPipelineState::IDLE);
     frames_available_for_update.release();
   }
@@ -917,10 +919,72 @@ auto LuminaRenderer::RenderThread() -> void {
   platform::common::PlatformServices::Instance().LuminaSetThreadName(
       "LuminaRendererThread");
   while (!shutdown_requested) {
+    PollAndExecuteCommandContexts();
     AcquireFrameContextForRender();
     DrawFrame();
     ReleaseFrameContextForRender();
     TryReclaimFrameContexts();
+  }
+}
+
+auto LuminaRenderer::PollAndExecuteCommandContexts() -> void {
+  auto size = global_submission_queue.Size();
+  std::vector<CommandContext *> cmd_ctxs(size);
+  for (size_t i = 0; i < size; ++i) {
+    auto res = global_submission_queue.Pop(cmd_ctxs[i]);
+    ASSERT(res, "Failed to pop command context from submission queue");
+  }
+
+  if (!cmd_ctxs.empty()) {
+    std::vector<VkCommandBuffer> command_buffers(cmd_ctxs.size());
+    for (size_t i = 0; i < cmd_ctxs.size(); ++i) {
+      command_buffers[i] = cmd_ctxs[i]->command_buffer;
+    }
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
+        .commandBufferCount = static_cast<uint32_t>(cmd_ctxs.size()),
+        .pCommandBuffers = command_buffers.data(),
+    };
+
+    auto submission_fence_result = vulkan_context.CreateFence(false);
+    if (!submission_fence_result) {
+      LOG_CRITICAL("Failed to create submission fence: {}",
+                   submission_fence_result.error().message);
+      LUMINA_TERMINATE();
+    }
+    auto *submission_fence = submission_fence_result.value();
+
+    if (auto result = vkQueueSubmit(vulkan_context.GetGraphicsQueue(), 1,
+                                    &submit_info, submission_fence);
+        result != VK_SUCCESS) {
+      LOG_ERROR("Failed to submit command buffer for copy transfer: {}",
+                string_VkResult(result));
+      LUMINA_TERMINATE();
+    }
+
+    pending_submissions.emplace_back(submission_fence, std::move(cmd_ctxs));
+  }
+
+  for (auto it = pending_submissions.begin();
+       it != pending_submissions.end();) {
+    auto &[fence, cmd_ctxs] = *it;
+    auto status = vkGetFenceStatus(vulkan_context.GetDevice(), fence);
+    if (status == VK_SUCCESS) {
+      vulkan_context.DestroyFence(fence);
+      for (auto &cmd_ctx : cmd_ctxs) {
+        cmd_ctx->RunCompletionCallbacks();
+        cmd_ctx->Reset();
+        ReleaseCommandContext(*cmd_ctx);
+      }
+      it = pending_submissions.erase(it);
+    } else {
+      ++it;
+    }
   }
 }
 
@@ -931,6 +995,9 @@ auto LuminaRenderer::Initialize() -> void {
                  vulkan_context.Initialize().error().message);
     LUMINA_TERMINATE();
   }
+
+  command_context_pool.Initialize(
+      32, [this](auto &ctx) { ctx.Initialize(vulkan_context); });
 
   auto command_pool_result = vulkan_context.CreateCommandPool();
   if (!command_pool_result) {
@@ -961,16 +1028,21 @@ auto LuminaRenderer::Initialize() -> void {
     LUMINA_TERMINATE();
   }
 
-  auto res = CreateVertexBuffer(vulkan_context, command_pool,
-                                vertex_buffer_memory, vertex_buffer);
-  ASSERT(res, "Failed to create vertex buffer");
+  auto vert_data =
+      DataBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
+  auto index_data =
+      DataBuffer(indices.data(), indices.size() * sizeof(uint16_t));
+  /*
+    auto res = CreateVertexBuffer(vulkan_context, command_pool,
+    vert_data.View(), vertex_buffer_memory, vertex_buffer); ASSERT(res, "Failed
+    to create vertex buffer");
 
-  res = CreateIndexBuffer(vulkan_context, command_pool, index_buffer_memory,
-                          index_buffer);
-  ASSERT(res, "Failed to create index buffer");
-
-  res = CreateTextureImage(vulkan_context, command_pool, texture_image,
-                           texture_image_memory);
+    res = CreateIndexBuffer(vulkan_context, command_pool, index_data.View(),
+                            index_buffer_memory, index_buffer);
+    ASSERT(res, "Failed to create index buffer");
+  */
+  auto res = CreateTextureImage(vulkan_context, command_pool, texture_image,
+                                texture_image_memory);
   ASSERT(res, "Failed to create texture image");
   auto texture_image_view_result =
       CreateTextureImageView(vulkan_context, texture_image);
@@ -991,7 +1063,7 @@ auto LuminaRenderer::Initialize() -> void {
       LUMINA_TERMINATE();
     }
     frame_contexts.push_back(std::move(frame_context_result.value()));
-    auto &uniform_buffer = frame_contexts[i].GetUniformBuffer();
+    auto &uniform_buffer = frame_contexts[i]->GetUniformBuffer();
     auto uniform_buffer_result =
         CreateUniformBuffer(vulkan_context, uniform_buffer.memory,
                             uniform_buffer.buffer, uniform_buffer.mapped);
@@ -1003,7 +1075,7 @@ auto LuminaRenderer::Initialize() -> void {
   ASSERT(desc_pool_result, "Failed to create descriptor pool");
   std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    uniform_buffers[i] = frame_contexts[i].GetUniformBuffer().buffer;
+    uniform_buffers[i] = frame_contexts[i]->GetUniformBuffer().buffer;
   }
   auto desc_sets_result = CreateDescriptorSets(
       vulkan_context, descriptor_pool, MAX_FRAMES_IN_FLIGHT,
@@ -1448,19 +1520,21 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   };
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-  VkBuffer vertexBuffers[] = {vertex_buffer};
-  VkDeviceSize offsets[] = {0};
-  vkCmdBindVertexBuffers(command_buffer, 0, 1, vertexBuffers, offsets);
-
-  VkBuffer indexBuffer[] = {index_buffer};
-  vkCmdBindIndexBuffer(command_buffer, index_buffer, 0, VK_INDEX_TYPE_UINT16);
-
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipeline_layout, 0, 1,
                           &descriptor_sets[current_frame_index], 0, nullptr);
-
-  vkCmdDrawIndexed(command_buffer, static_cast<u32>(indices.size()), 1, 0, 0,
-                   0);
+  auto render_mesh_opt =
+      render_mesh_manager.Get(frame_context.render_mesh_handle);
+  if (render_mesh_opt.has_value() && render_mesh_opt.value().ready) {
+    const auto &render_mesh = render_mesh_opt.value();
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                           &render_mesh.vertex_streams[0].buffer, offsets);
+    vkCmdBindIndexBuffer(command_buffer, render_mesh.index_buffer, 0,
+                         VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(command_buffer,
+                     static_cast<u32>(render_mesh.index_count), 1, 0, 0, 0);
+  }
 
   vkCmdEndRendering(command_buffer);
 
@@ -1479,5 +1553,104 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   }
 
   return std::expected<void, VkInitializationError>{};
+}
+
+auto LuminaRenderer::AcquireCommandContext() -> CommandContext & {
+  return *command_context_pool.Acquire();
+}
+
+auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
+  command_context_pool.Release(&cmd_ctx);
+}
+
+auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh)
+    -> RenderMeshHandle {
+  auto &cmd_ctx = AcquireCommandContext();
+  cmd_ctx.Begin();
+  auto render_mesh_handle = render_mesh_manager.Create();
+  auto render_mesh_opt = render_mesh_manager.Get(render_mesh_handle);
+  ASSERT(render_mesh_opt.has_value(), "Render mesh not found");
+  auto &render_mesh = render_mesh_opt.value();
+  VertexBufferLayout layout =
+      VertexBufferLayout::Interleave(std::span<const core::VertexAttributeType>(
+          {core::VertexAttributeType::Position,
+           core::VertexAttributeType::Color,
+           core::VertexAttributeType::TexCoord}));
+  auto vertex_streams_data = SerializeVertexBuffer(mesh, layout);
+  render_mesh.vertex_count = mesh.vertex_count;
+  std::vector<VulkanBufferResources> staging_resources;
+  for (const auto &[stream_stride, vertex_stream] : vertex_streams_data) {
+    render_mesh.vertex_streams.emplace_back();
+    auto [success, staging_buffer, device_buffer] =
+        RecordVertexBufferUploadCommands(vulkan_context, cmd_ctx.command_buffer,
+                                         vertex_stream.View());
+    // TODO: Handle error gracefully
+    ASSERT(success, "Failed to create vertex buffer");
+    auto &render_mesh_vertex_stream = render_mesh.vertex_streams.back();
+    render_mesh_vertex_stream.buffer = device_buffer.buffer;
+    render_mesh_vertex_stream.memory = device_buffer.memory;
+    render_mesh_vertex_stream.stride = stream_stride;
+    staging_resources.emplace_back(staging_buffer);
+  }
+
+  DataBuffer index_buffer = DataBuffer(indices2.size() * sizeof(u16));
+  index_buffer.Write(0, indices2.data(), indices2.size() * sizeof(u16));
+  auto [success, staging_buffer, device_buffer] =
+      RecordIndexBufferUploadCommands(
+          *cmd_ctx.vulkan_context, cmd_ctx.command_buffer, index_buffer.View());
+  // TODO: Handle error gracefully
+  ASSERT(success, "Failed to create index buffer");
+  render_mesh.index_buffer = device_buffer.buffer;
+  render_mesh.index_buffer_memory = device_buffer.memory;
+  render_mesh.index_count = indices2.size();
+  staging_resources.emplace_back(staging_buffer);
+  render_mesh.ready = false;
+  render_mesh_manager.Set(render_mesh_handle, std::move(render_mesh));
+  cmd_ctx.AddCompletionCallback(
+      [staging = std::move(staging_resources), render_mesh_handle,
+       render_mesh_manager =
+           &this->render_mesh_manager](CommandContext *cmd_ctx) -> void {
+        for (const auto &staging_buffer : staging) {
+          vkDestroyBuffer(cmd_ctx->vulkan_context->GetDevice(),
+                          staging_buffer.buffer, nullptr);
+          vkFreeMemory(cmd_ctx->vulkan_context->GetDevice(),
+                       staging_buffer.memory, nullptr);
+        }
+        auto mesh = render_mesh_manager->Get(render_mesh_handle);
+        mesh->ready = true;
+        render_mesh_manager->Set(render_mesh_handle, std::move(*mesh));
+      });
+  cmd_ctx.End();
+  SubmitCommandContext(cmd_ctx);
+  return render_mesh_handle;
+}
+
+auto LuminaRenderer::DestroyRenderMesh(RenderMeshHandle handle) -> void {
+  auto render_mesh_opt = render_mesh_manager.Get(handle);
+  if (!render_mesh_opt.has_value()) {
+    return;
+  }
+  const auto &render_mesh = render_mesh_opt.value();
+  for (const auto &stream : render_mesh.vertex_streams) {
+    if (stream.buffer != VK_NULL_HANDLE) {
+      vkDestroyBuffer(vulkan_context.GetDevice(), stream.buffer, nullptr);
+    }
+    if (stream.memory != VK_NULL_HANDLE) {
+      vkFreeMemory(vulkan_context.GetDevice(), stream.memory, nullptr);
+    }
+  }
+  if (render_mesh.index_buffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(vulkan_context.GetDevice(), render_mesh.index_buffer,
+                    nullptr);
+  }
+  if (render_mesh.index_buffer_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), render_mesh.index_buffer_memory,
+                 nullptr);
+  }
+  render_mesh_manager.Destroy(handle);
+}
+
+auto LuminaRenderer::SubmitCommandContext(CommandContext &cmd_ctx) -> void {
+  global_submission_queue.Push(&cmd_ctx);
 }
 } // namespace lumina::renderer

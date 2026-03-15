@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/vector.hpp"
 #include "static_mesh.hpp"
 
 namespace lumina::core {
@@ -21,11 +22,12 @@ public:
         {1.0, 1.0, 1.0},
     };
     std::vector<math::Vec2> tex_coords = {
-        {0.0, 0.0},
-        {1.0, 0.0},
-        {1.0, 1.0},
         {0.0, 1.0},
+        {1.0, 1.0},
+        {1.0, 0.0},
+        {0.0, 0.0},
     };
+    mesh.vertex_count = positions.size();
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Position,
                         .element_type = ElementType::Vec3},
