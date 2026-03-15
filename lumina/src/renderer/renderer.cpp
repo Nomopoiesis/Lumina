@@ -6,7 +6,13 @@
 #include "common/lumina_terminate.hpp"
 #include "core/lumina_engine.hpp"
 #include "graphics_pipeline.hpp"
+#include "material_instance.hpp"
+#include "material_instance_handle.hpp"
+#include "material_template.hpp"
 #include "shaders/shader_module_cache.hpp"
+#include "shaders/shader_vk_helpers.hpp"
+#include "standard_lit.frag.gen.hpp"
+#include "standard_lit.vert.gen.hpp"
 #include "vertex_layout.hpp"
 #include "vertex_serializer.hpp"
 
@@ -14,6 +20,8 @@
 #include <vulkan/vk_enum_string_helper.h>
 
 #include <array>
+#include <map>
+#include <set>
 
 #define GLM_FORCE_RADIANS
 #define GLM_ENABLE_EXPERIMENTAL
@@ -28,46 +36,6 @@
 namespace lumina::renderer {
 
 using namespace lumina::common::data_structures;
-
-static auto
-CreateDescriptorSetLayout(VulkanContext &vulkan_context,
-                          VkDescriptorSetLayout &descriptor_set_layout)
-    -> bool {
-  VkDescriptorSetLayoutBinding ubo_layout_binding = {
-      .binding = 0,
-      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-      .pImmutableSamplers = nullptr,
-  };
-
-  VkDescriptorSetLayoutBinding sampler_layout_binding = {
-      .binding = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-      .pImmutableSamplers = nullptr,
-  };
-
-  std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
-      ubo_layout_binding, sampler_layout_binding};
-
-  VkDescriptorSetLayoutCreateInfo layout_info = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .bindingCount = static_cast<u32>(bindings.size()),
-      .pBindings = bindings.data(),
-  };
-
-  if (vkCreateDescriptorSetLayout(vulkan_context.GetDevice(), &layout_info,
-                                  nullptr,
-                                  &descriptor_set_layout) != VK_SUCCESS) {
-    LOG_ERROR("Failed to create descriptor set layout");
-    return false;
-  }
-  return true;
-}
 
 static auto FindMemoryType(VulkanContext &vulkan_context, u32 type_filter,
                            VkMemoryPropertyFlags properties) -> u32 {
@@ -417,101 +385,71 @@ static auto RecordIndexBufferUploadCommands(VulkanContext &vulkan_context,
   return std::make_tuple(true, staging_buffer, device_buffer);
 }
 
-static auto CreateDescriptorPool(VulkanContext &vulkan_context,
-                                 VkDescriptorPool &descriptor_pool,
-                                 size_t descriptor_count) -> bool {
-  std::array<VkDescriptorPoolSize, 2> pool_sizes{};
-  pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  pool_sizes[0].descriptorCount = descriptor_count;
-  pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  pool_sizes[1].descriptorCount = descriptor_count;
+auto LuminaRenderer::CreateDescriptorPools()
+    -> std::expected<void, VkInitializationError> {
 
-  VkDescriptorPoolCreateInfo pool_info = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .maxSets = SafeU64ToU32(descriptor_count),
-      .poolSizeCount = static_cast<u32>(pool_sizes.size()),
-      .pPoolSizes = pool_sizes.data(),
-  };
-  if (auto result = vkCreateDescriptorPool(
-          vulkan_context.GetDevice(), &pool_info, nullptr, &descriptor_pool);
-      result != VK_SUCCESS) {
-    LOG_ERROR("Failed to create descriptor pool: {}", string_VkResult(result));
-    return false;
-  }
-  return true;
-}
-
-static auto
-CreateDescriptorSets(VulkanContext &vulkan_context,
-                     VkDescriptorPool &descriptor_pool, size_t descriptor_count,
-                     VkBuffer *uniform_buffers, VkSampler &texture_sampler,
-                     VkImageView &texture_image_view,
-                     VkDescriptorSetLayout &descriptor_set_layout,
-                     std::vector<VkDescriptorSet> &descriptor_sets) -> bool {
-  std::vector<VkDescriptorSetLayout> descriptor_set_layouts(
-      descriptor_count, descriptor_set_layout);
-
-  VkDescriptorSetAllocateInfo alloc_info = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-      .pNext = nullptr,
-      .descriptorPool = descriptor_pool,
-      .descriptorSetCount = SafeU64ToU32(descriptor_count),
-      .pSetLayouts = descriptor_set_layouts.data(),
-  };
-
-  descriptor_sets.resize(descriptor_count);
-  if (auto result = vkAllocateDescriptorSets(
-          vulkan_context.GetDevice(), &alloc_info, descriptor_sets.data());
-      result != VK_SUCCESS) {
-    LOG_ERROR("Failed to allocate descriptor sets: {}",
-              string_VkResult(result));
-    return false;
+  // Create persistent descriptor pool
+  std::vector<VkDescriptorPoolSize> persistent_pool_sizes;
+  for (auto &[type, count] : persistent_descriptor_pool_budget) {
+    persistent_pool_sizes.push_back({
+        .type = ToVkDescriptorType(type),
+        .descriptorCount = SafeU64ToU32(count),
+    });
   }
 
-  for (size_t i = 0; i < descriptor_count; ++i) {
-    VkDescriptorBufferInfo buffer_info = {
-        .buffer = uniform_buffers[i],
-        .offset = 0,
-        .range = sizeof(core::UniformBufferObject),
+  if (!persistent_pool_sizes.empty()) {
+    VkDescriptorPoolCreateInfo persistent_pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets = SafeU64ToU32(max_persistent_descriptor_sets),
+        .poolSizeCount = static_cast<u32>(persistent_pool_sizes.size()),
+        .pPoolSizes = persistent_pool_sizes.data(),
     };
-    VkDescriptorImageInfo image_info = {
-        .sampler = texture_sampler,
-        .imageView = texture_image_view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    };
-    std::array<VkWriteDescriptorSet, 2> write_descriptor_sets = {
-        VkWriteDescriptorSet{
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext = nullptr,
-            .dstSet = descriptor_sets[i],
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .pImageInfo = nullptr,
-            .pBufferInfo = &buffer_info,
-            .pTexelBufferView = nullptr,
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext = nullptr,
-            .dstSet = descriptor_sets[i],
-            .dstBinding = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &image_info,
-            .pBufferInfo = nullptr,
-            .pTexelBufferView = nullptr,
-        },
-    };
-    vkUpdateDescriptorSets(vulkan_context.GetDevice(),
-                           static_cast<u32>(write_descriptor_sets.size()),
-                           write_descriptor_sets.data(), 0, nullptr);
+    if (auto result = vkCreateDescriptorPool(vulkan_context.GetDevice(),
+                                             &persistent_pool_info, nullptr,
+                                             &persistent_descriptor_pool);
+        result != VK_SUCCESS) {
+      return std::unexpected(VkInitializationError{
+          .message = "Failed to create persistent descriptor pool: " +
+                     std::to_string(result) + ": " + string_VkResult(result)});
+    }
   }
-  return true;
+
+  // Create transient descriptor pool (per frame)
+  std::vector<VkDescriptorPoolSize> transient_pool_sizes;
+  for (auto &[type, count] : transient_descriptor_pool_budget) {
+    transient_pool_sizes.push_back({
+        .type = ToVkDescriptorType(type),
+        .descriptorCount = SafeU64ToU32(count),
+    });
+  }
+
+  if (!transient_pool_sizes.empty()) {
+    VkDescriptorPoolCreateInfo transient_pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .maxSets = SafeU64ToU32(max_transient_descriptor_sets),
+        .poolSizeCount = static_cast<u32>(transient_pool_sizes.size()),
+        .pPoolSizes = transient_pool_sizes.data(),
+    };
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+      VkDescriptorPool transient_descriptor_pool = VK_NULL_HANDLE;
+      if (auto result = vkCreateDescriptorPool(vulkan_context.GetDevice(),
+                                               &transient_pool_info, nullptr,
+                                               &transient_descriptor_pool);
+          result != VK_SUCCESS) {
+        return std::unexpected(VkInitializationError{
+            .message = "Failed to create transient descriptor pool: " +
+                       std::to_string(result) + ": " +
+                       string_VkResult(result)});
+      }
+      frame_contexts[i]->SetTransientDescriptorPool(transient_descriptor_pool);
+    }
+  }
+
+  return {};
 }
 
 static auto CreateUniformBuffer(VulkanContext &vulkan_context,
@@ -745,14 +683,9 @@ LuminaRenderer::~LuminaRenderer() noexcept {
     vkFreeMemory(vulkan_context.GetDevice(), texture_image_memory, nullptr);
   }
 
-  if (descriptor_pool != VK_NULL_HANDLE) {
-    vkDestroyDescriptorPool(vulkan_context.GetDevice(), descriptor_pool,
-                            nullptr);
-  }
-
-  if (descriptor_set_layout != VK_NULL_HANDLE) {
-    vkDestroyDescriptorSetLayout(vulkan_context.GetDevice(),
-                                 descriptor_set_layout, nullptr);
+  if (persistent_descriptor_pool != VK_NULL_HANDLE) {
+    vkDestroyDescriptorPool(vulkan_context.GetDevice(),
+                            persistent_descriptor_pool, nullptr);
   }
 
   if (command_pool != VK_NULL_HANDLE) {
@@ -766,11 +699,6 @@ LuminaRenderer::~LuminaRenderer() noexcept {
                         nullptr);
     }
   });
-
-  if (pipeline_layout != VK_NULL_HANDLE) {
-    vkDestroyPipelineLayout(vulkan_context.GetDevice(), pipeline_layout,
-                            nullptr);
-  }
 }
 
 auto LuminaRenderer::AcquireFrameContextForUpdate() -> void {
@@ -944,15 +872,28 @@ auto LuminaRenderer::Initialize() -> void {
   }
   command_pool = command_pool_result.value();
 
-  auto desc_result =
-      CreateDescriptorSetLayout(vulkan_context, descriptor_set_layout);
-  ASSERT(desc_result, "Failed to create descriptor set layout");
-
-  if (!CreatePipelineLayout()) {
-    LOG_CRITICAL("Failed to create pipeline layout: {}",
-                 CreatePipelineLayout().error().message);
+  auto shader_interface_result = ShaderInterface::Create(
+      vulkan_context.GetDevice(), lumina::shaders::standard_lit::vert::kLayout,
+      lumina::shaders::standard_lit::frag::kLayout);
+  if (!shader_interface_result) {
+    LOG_CRITICAL("Failed to create shader interface: {}",
+                 shader_interface_result.error().message);
     LUMINA_TERMINATE();
   }
+  shader_interface = std::move(shader_interface_result.value());
+
+  MaterialTemplateDescription mat_desc = {
+      .shader_interface = &shader_interface,
+      .vertex_layout = lumina::shaders::standard_lit::vert::kLayout,
+      .fragment_layout = lumina::shaders::standard_lit::frag::kLayout,
+      .vertex_shader_bin_path = "shaders/spv/shader.vert.spv",
+      .fragment_shader_bin_path = "shaders/spv/shader.frag.spv",
+      .max_instances = 2,
+  };
+  auto mat_template_handle = CreateMaterialTemplate(mat_desc);
+
+  default_material_instance_handle =
+      CreateMaterialInstance(mat_template_handle);
 
   auto depth_result = CreateDepthResources(
       vulkan_context, command_pool, depth_image, depth_image_view,
@@ -988,21 +929,51 @@ auto LuminaRenderer::Initialize() -> void {
     ASSERT(uniform_buffer_result, "Failed to create uniform buffer");
   }
 
-  auto desc_pool_result = CreateDescriptorPool(vulkan_context, descriptor_pool,
-                                               MAX_FRAMES_IN_FLIGHT);
-  ASSERT(desc_pool_result, "Failed to create descriptor pool");
+  auto desc_pool_result = CreateDescriptorPools();
+  if (!desc_pool_result) {
+    LOG_CRITICAL("Failed to create descriptor pools: {}",
+                 desc_pool_result.error().message);
+    LUMINA_TERMINATE();
+  }
   std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
     uniform_buffers[i] = frame_contexts[i]->GetUniformBuffer().buffer;
   }
-  auto desc_sets_result = CreateDescriptorSets(
-      vulkan_context, descriptor_pool, MAX_FRAMES_IN_FLIGHT,
-      uniform_buffers.data(), texture_sampler, texture_image_view,
-      descriptor_set_layout, descriptor_sets);
-  ASSERT(desc_sets_result, "Failed to create descriptor sets");
+
+  AllocatePersistentDescriptorSets(default_material_instance_handle);
+
+  // Write texture binding into the default material's persistent descriptor
+  // sets (set 1, binding 0 = CombinedImageSampler).
+  {
+    auto *instance =
+        material_instance_manager.GetRef(default_material_instance_handle);
+    ASSERT(instance != nullptr, "Default material instance not found");
+
+    VkDescriptorImageInfo image_info = {
+        .sampler = texture_sampler,
+        .imageView = texture_image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+      VkWriteDescriptorSet write = {
+          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .pNext = nullptr,
+          .dstSet = instance->GetDescriptorSet(i),
+          .dstBinding = 0,
+          .dstArrayElement = 0,
+          .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .pImageInfo = &image_info,
+          .pBufferInfo = nullptr,
+          .pTexelBufferView = nullptr,
+      };
+      vkUpdateDescriptorSets(vulkan_context.GetDevice(), 1, &write, 0, nullptr);
+    }
+  }
 
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
-}
+} // namespace lumina::renderer
 
 auto LuminaRenderer::Shutdown() -> void {
   shutdown_requested = true;
@@ -1018,6 +989,8 @@ auto LuminaRenderer::DrawFrame() -> void {
 
   vkResetFences(vulkan_context.GetDevice(), 1,
                 &frame_context.GetFrameBeginReadyFence());
+
+  PrepareFrameDescriptors(frame_context);
 
   u32 image_index = 0;
   VkResult result = vkAcquireNextImageKHR(
@@ -1101,34 +1074,6 @@ auto LuminaRenderer::DrawFrame() -> void {
   current_frame_index = (current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-auto LuminaRenderer::CreatePipelineLayout()
-    -> std::expected<void, VkInitializationError> {
-  VkPushConstantRange range = {
-      .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-      .offset = 0,
-      .size = sizeof(math::Mat4),
-  };
-
-  VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .setLayoutCount = 1,
-      .pSetLayouts = &descriptor_set_layout,
-      .pushConstantRangeCount = 1,
-      .pPushConstantRanges = &range,
-  };
-
-  if (vkCreatePipelineLayout(vulkan_context.GetDevice(),
-                             &pipeline_layout_create_info, nullptr,
-                             &pipeline_layout) != VK_SUCCESS) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to create pipeline layout"});
-  }
-
-  return std::expected<void, VkInitializationError>{};
-}
-
 static auto ToVkFormat(core::ElementType element_type) -> VkFormat {
   switch (element_type) {
     case core::ElementType::Float:
@@ -1164,16 +1109,30 @@ static auto ToVkBindingDescriptions(const VertexBufferLayout &layout)
   return descriptions;
 }
 
-static auto ToVkAttributeDescriptions(const VertexBufferLayout &layout)
+static auto
+ToVkAttributeDescriptions(const VertexBufferLayout &layout,
+                          const VertexInputLayout &vertex_input_layout)
     -> std::vector<VkVertexInputAttributeDescription> {
   std::vector<VkVertexInputAttributeDescription> descriptions;
-  u32 location = 0;
   for (u32 binding = 0; binding < static_cast<u32>(layout.streams.size());
        ++binding) {
     u32 offset = 0;
     for (const auto &attr : layout.streams[binding].attributes) {
+      u32 location = UINT32_MAX;
+      for (u32 i = 0; i < vertex_input_layout.input_count; ++i) {
+        if (vertex_input_layout.inputs[i].attribute_type == attr.type) {
+          location = vertex_input_layout.inputs[i].location;
+          ASSERT(vertex_input_layout.inputs[i].element_type ==
+                     attr.element_type,
+                 "Vertex attribute element type does not match shader vertex "
+                 "input layout");
+          break;
+        }
+      }
+      ASSERT(location != UINT32_MAX, "Vertex attribute has no matching "
+                                     "location in shader vertex input layout");
       descriptions.push_back({
-          .location = location++,
+          .location = location,
           .binding = binding,
           .format = ToVkFormat(attr.element_type),
           .offset = offset,
@@ -1184,17 +1143,207 @@ static auto ToVkAttributeDescriptions(const VertexBufferLayout &layout)
   return descriptions;
 }
 
+auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
+    -> void {
+  auto *device = vulkan_context.GetDevice();
+  auto *pool = frame_context.GetTransientDescriptorPool();
+
+  // Reset the transient pool
+  vkResetDescriptorPool(device, pool, 0);
+
+  // Allocate a single descriptor set for set 0 (per-frame globals).
+  auto *dsl = shader_interface.GetDescriptorSetLayout(0);
+  ASSERT(dsl != VK_NULL_HANDLE, "Set 0 descriptor set layout not found");
+
+  VkDescriptorSetAllocateInfo alloc_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+      .pNext = nullptr,
+      .descriptorPool = pool,
+      .descriptorSetCount = 1,
+      .pSetLayouts = &dsl,
+  };
+
+  VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+  auto result = vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set);
+  ASSERT(result == VK_SUCCESS, "Failed to allocate transient descriptor set");
+
+  // Write the per-frame UBO into binding 0.
+  VkDescriptorBufferInfo buffer_info = {
+      .buffer = frame_context.GetUniformBuffer().buffer,
+      .offset = 0,
+      .range = sizeof(core::UniformBufferObject),
+  };
+
+  VkWriteDescriptorSet write = {
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .pNext = nullptr,
+      .dstSet = descriptor_set,
+      .dstBinding = 0,
+      .dstArrayElement = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .pImageInfo = nullptr,
+      .pBufferInfo = &buffer_info,
+      .pTexelBufferView = nullptr,
+  };
+
+  vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+
+  frame_context.SetTransientDescriptorSet(descriptor_set);
+}
+
+auto LuminaRenderer::AllocatePersistentDescriptorSets(
+    MaterialInstanceHandle instance_handle) -> bool {
+  auto *instance = material_instance_manager.GetRef(instance_handle);
+  if (instance == nullptr) {
+    LOG_CRITICAL("Material instance not found");
+    LUMINA_TERMINATE();
+  }
+  auto tmpl_opt = material_template_manager.Get(instance->GetTemplateHandle());
+  if (!tmpl_opt) {
+    LOG_CRITICAL("Material template not found");
+    LUMINA_TERMINATE();
+  }
+  auto &tmpl = tmpl_opt.value();
+  auto *device = vulkan_context.GetDevice();
+  const auto *interface = tmpl.GetShaderInterface();
+  ASSERT(interface != nullptr, "MaterialTemplate has no ShaderInterface");
+
+  // Get the descriptor set layout for set 1 (per-material).
+  auto *dsl = interface->GetDescriptorSetLayout(1);
+  if (dsl == VK_NULL_HANDLE) {
+    LOG_WARNING("No descriptor set layout for set 1 — material has no "
+                "persistent bindings");
+    return true;
+  }
+
+  // Allocate MAX_FRAMES_IN_FLIGHT sets from the persistent pool.
+  std::array<VkDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
+  layouts.fill(dsl);
+
+  VkDescriptorSetAllocateInfo alloc_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+      .pNext = nullptr,
+      .descriptorPool = persistent_descriptor_pool,
+      .descriptorSetCount = static_cast<u32>(MAX_FRAMES_IN_FLIGHT),
+      .pSetLayouts = layouts.data(),
+  };
+
+  auto &descriptor_sets = instance->GetDescriptorSetsMutable();
+  auto result =
+      vkAllocateDescriptorSets(device, &alloc_info, descriptor_sets.data());
+  if (result != VK_SUCCESS) {
+    LOG_ERROR("Failed to allocate persistent descriptor sets: {}",
+              string_VkResult(result));
+    return false;
+  }
+
+  return true;
+}
+
+auto LuminaRenderer::FreePersistentDescriptorSets(
+    MaterialInstanceHandle instance_handle) -> void {
+  auto *instance = material_instance_manager.GetRef(instance_handle);
+  if (instance == nullptr) {
+    LOG_CRITICAL("Material instance not found");
+    LUMINA_TERMINATE();
+  }
+  const auto &descriptor_sets = instance->GetDescriptorSets();
+
+  // Check if any sets were actually allocated.
+  if (descriptor_sets[0] == VK_NULL_HANDLE) {
+    return;
+  }
+
+  vkFreeDescriptorSets(vulkan_context.GetDevice(), persistent_descriptor_pool,
+                       static_cast<u32>(MAX_FRAMES_IN_FLIGHT),
+                       descriptor_sets.data());
+  instance->ResetDescriptorSets();
+}
+
+auto LuminaRenderer::AccumulateDescriptorBudget(const ShaderLayout &vert_layout,
+                                                const ShaderLayout &frag_layout,
+                                                size_t max_instances) -> void {
+  // Merge bindings by (set, binding) key to avoid double-counting shared
+  // bindings between vertex and fragment stages.
+  std::map<std::pair<u32, u32>, DescriptorBindingType> merged;
+  for (u32 i = 0; i < vert_layout.binding_count; ++i) {
+    const auto &b = vert_layout.bindings[i];
+    merged[{b.set, b.binding}] = b.type;
+  }
+  for (u32 i = 0; i < frag_layout.binding_count; ++i) {
+    const auto &b = frag_layout.bindings[i];
+    merged[{b.set, b.binding}] = b.type;
+  }
+
+  // Accumulate into budgets from the merged set.
+  std::set<u32> persistent_sets;
+  for (const auto &[key, type] : merged) {
+    auto [set, binding] = key;
+    if (set == 0) {
+      transient_descriptor_pool_budget[type] += 1;
+    } else {
+      persistent_descriptor_pool_budget[type] +=
+          max_instances * MAX_FRAMES_IN_FLIGHT;
+      persistent_sets.insert(set);
+    }
+  }
+
+  max_transient_descriptor_sets += 1;
+  max_persistent_descriptor_sets +=
+      max_instances * persistent_sets.size() * MAX_FRAMES_IN_FLIGHT;
+}
+
+auto LuminaRenderer::CreateMaterialTemplate(
+    const MaterialTemplateDescription &desc) -> MaterialTemplateHandle {
+  auto material_template_result = MaterialTemplate::Create(desc);
+  if (!material_template_result) {
+    LOG_CRITICAL("Failed to create material template: {}",
+                 material_template_result.error().message);
+    LUMINA_TERMINATE();
+  }
+  auto &material_template = material_template_result.value();
+
+  AccumulateDescriptorBudget(desc.vertex_layout, desc.fragment_layout,
+                             desc.max_instances);
+
+  auto material_template_handle = material_template_manager.Create();
+  material_template_manager.Set(material_template_handle,
+                                std::move(material_template));
+  return material_template_handle;
+}
+
+auto LuminaRenderer::CreateMaterialInstance(MaterialTemplateHandle tmpl_handle)
+    -> MaterialInstanceHandle {
+  auto material_instance_result = MaterialInstance::Create(tmpl_handle);
+  if (!material_instance_result) {
+    LOG_CRITICAL("Failed to create material instance: {}",
+                 material_instance_result.error().message);
+    LUMINA_TERMINATE();
+  }
+  auto material_instance_handle = material_instance_manager.Create();
+  material_instance_manager.Set(material_instance_handle,
+                                std::move(material_instance_result.value()));
+  return material_instance_handle;
+}
+
 auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
     -> GraphicsPipelineHandle {
+  auto material_template_opt =
+      material_template_manager.Get(desc.material_template);
+  if (!material_template_opt) {
+    LOG_CRITICAL("Material template not found");
+    LUMINA_TERMINATE();
+  }
+  auto &material_template = material_template_opt.value();
   ShaderModuleCache shader_module_cache(vulkan_context.GetDevice());
 
   auto vert_module_result = shader_module_cache.GetShaderModule(
-      "C:/Projects/c++/Lumina/lumina/data/shaders/spv/shader.vert.spv",
-      VK_SHADER_STAGE_VERTEX_BIT);
+      material_template.GetVertexShaderBinPath(), VK_SHADER_STAGE_VERTEX_BIT);
   ASSERT(vert_module_result, "Failed to create vertex shader");
 
   auto frag_module_result = shader_module_cache.GetShaderModule(
-      "C:/Projects/c++/Lumina/lumina/data/shaders/spv/shader.frag.spv",
+      material_template.GetFragmentShaderBinPath(),
       VK_SHADER_STAGE_FRAGMENT_BIT);
   ASSERT(frag_module_result, "Failed to create fragment shader");
 
@@ -1230,7 +1379,9 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
   };
 
   auto binding_descriptions = ToVkBindingDescriptions(desc.vertex_layout);
-  auto attribute_descriptions = ToVkAttributeDescriptions(desc.vertex_layout);
+  auto attribute_descriptions = ToVkAttributeDescriptions(
+      desc.vertex_layout,
+      material_template.GetShaderInterface()->GetVertexInputLayout());
 
   VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -1346,7 +1497,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       .pDepthStencilState = &depth_stencil_state_create_info,
       .pColorBlendState = &color_blend_state_create_info,
       .pDynamicState = &dynamic_state_create_info,
-      .layout = pipeline_layout,
+      .layout = shader_interface.GetPipelineLayout(),
       .renderPass = VK_NULL_HANDLE,
       .subpass = 0,
       .basePipelineHandle = VK_NULL_HANDLE,
@@ -1355,6 +1506,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
 
   GraphicsPipeline gfx_pipeline;
   gfx_pipeline.vertex_layout = desc.vertex_layout;
+  gfx_pipeline.material_template = desc.material_template;
 
   if (vkCreateGraphicsPipelines(vulkan_context.GetDevice(), nullptr, 1,
                                 &pipeline_create_info, nullptr,
@@ -1496,8 +1648,10 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipeline_layout, 0, 1,
-                          &descriptor_sets[current_frame_index], 0, nullptr);
+                          shader_interface.GetPipelineLayout(), 0, 1,
+                          &frame_context.GetTransientDescriptorSet(), 0,
+                          nullptr);
+
   for (const auto &draw_mesh_info : frame_context.render_draw_list) {
     auto handle = draw_mesh_info.render_mesh_handle;
     auto model = draw_mesh_info.model;
@@ -1512,12 +1666,23 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
     }
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipeline_opt->vk_pipeline);
+    auto material_instance_opt =
+        material_instance_manager.Get(draw_mesh_info.material_instance);
+    if (!material_instance_opt.has_value()) {
+      continue;
+    }
+    auto &material_instance = material_instance_opt.value();
+    vkCmdBindDescriptorSets(
+        command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        shader_interface.GetPipelineLayout(), 1, 1,
+        &material_instance.GetDescriptorSet(current_frame_index), 0, nullptr);
+
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(command_buffer, 0, 1,
                            &render_mesh.vertex_streams[0].buffer, offsets);
     vkCmdBindIndexBuffer(command_buffer, render_mesh.index_buffer, 0,
                          VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(command_buffer, pipeline_layout,
+    vkCmdPushConstants(command_buffer, shader_interface.GetPipelineLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
                        &model);
     vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh.index_count),

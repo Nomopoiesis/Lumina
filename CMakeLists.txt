@@ -9,7 +9,7 @@ project(
   Lumina
   VERSION 0.1.0
   DESCRIPTION "Lumina Engine"
-  LANGUAGES CXX)
+  LANGUAGES CXX C)
 
 # Build configuration
 if(NOT CMAKE_BUILD_TYPE)
@@ -48,3 +48,4 @@ add_subdirectory(third_party)
 
 # Add subdirectories
 add_subdirectory(lumina)
+add_subdirectory(tools)

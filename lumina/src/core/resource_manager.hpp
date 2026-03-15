@@ -36,6 +36,7 @@ public:
   auto DestroyAll(Func &&on_destroy) -> void;
 
   auto Get(ResourceHandle<T> handle) -> std::optional<T>;
+  auto GetRef(ResourceHandle<T> handle) -> T *;
   auto Set(ResourceHandle<T> handle, T &&resource) -> void;
 
   template <typename Func>
@@ -129,6 +130,15 @@ auto ResourceManager<T>::Get(ResourceHandle<T> handle) -> std::optional<T> {
     return std::nullopt;
   }
   return resources[handle.index].resource;
+}
+
+template <typename T>
+auto ResourceManager<T>::GetRef(ResourceHandle<T> handle) -> T * {
+  if (handle.index >= next_index.load(std::memory_order_relaxed) ||
+      resources[handle.index].generation != handle.generation) {
+    return nullptr;
+  }
+  return &resources[handle.index].resource;
 }
 
 template <typename T>

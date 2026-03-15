@@ -1,10 +1,14 @@
 #pragma once
 
+#include "material_template.hpp"
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
 #include "command_context.hpp"
 #include "frame_context.hpp"
 #include "graphics_pipeline.hpp"
+#include "material_instance.hpp"
+#include "material_instance_handle.hpp"
+#include "shaders/shader_interface.hpp"
 #include "vulkan_context.hpp"
 
 #include "core/static_mesh.hpp"
@@ -18,6 +22,11 @@
 #include <vector>
 
 namespace lumina::renderer {
+
+using GraphicsPipelineManager = core::ResourceManager<GraphicsPipeline>;
+using RenderMeshManager = core::ResourceManager<RenderMesh>;
+using MaterialTemplateManager = core::ResourceManager<MaterialTemplate>;
+using MaterialInstanceManager = core::ResourceManager<MaterialInstance>;
 
 using CommandSubmissionQueue =
     common::data_structures::LockFreeConcurrentQueue<CommandContext *>;
@@ -69,6 +78,12 @@ public:
 
   auto AcquireCommandContext() -> CommandContext &;
 
+  auto CreateMaterialTemplate(const MaterialTemplateDescription &desc)
+      -> MaterialTemplateHandle;
+
+  auto CreateMaterialInstance(MaterialTemplateHandle tmpl_handle)
+      -> MaterialInstanceHandle;
+
   auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       -> GraphicsPipelineHandle;
 
@@ -76,6 +91,30 @@ public:
                         GraphicsPipelineHandle pipeline_handle)
       -> RenderMeshHandle;
   auto DestroyRenderMesh(RenderMeshHandle handle) -> void;
+
+  [[nodiscard]] auto GetDefaultMaterialInstanceHandle() const noexcept
+      -> MaterialInstanceHandle {
+    return default_material_instance_handle;
+  }
+
+  [[nodiscard]] auto GetMaterialInstance(MaterialInstanceHandle handle) noexcept
+      -> std::optional<MaterialInstance> {
+    return material_instance_manager.Get(handle);
+  }
+
+  [[nodiscard]] auto GetMaterialTemplate(MaterialTemplateHandle handle) noexcept
+      -> std::optional<MaterialTemplate> {
+    return material_template_manager.Get(handle);
+  }
+
+  [[nodiscard]] auto GetMaterialTemplate(MaterialInstanceHandle handle) noexcept
+      -> std::optional<MaterialTemplate> {
+    auto instance_opt = GetMaterialInstance(handle);
+    if (!instance_opt) {
+      return std::nullopt;
+    }
+    return GetMaterialTemplate(instance_opt.value().GetTemplateHandle());
+  }
 
 private:
   auto RenderThread() -> void;
@@ -91,11 +130,22 @@ private:
 
   auto PollAndExecuteCommandContexts() -> void;
 
-  auto CreatePipelineLayout() -> std::expected<void, VkInitializationError>;
-
   auto RecordCommandBuffer(FrameContext &frame_context,
                            u32 image_index) noexcept
       -> std::expected<void, VkInitializationError>;
+
+  auto PrepareFrameDescriptors(FrameContext &frame_context) -> void;
+
+  auto AllocatePersistentDescriptorSets(MaterialInstanceHandle instance_handle)
+      -> bool;
+  auto FreePersistentDescriptorSets(MaterialInstanceHandle instance_handle)
+      -> void;
+
+  auto AccumulateDescriptorBudget(const ShaderLayout &vert_layout,
+                                  const ShaderLayout &frag_layout,
+                                  size_t max_instances) -> void;
+
+  auto CreateDescriptorPools() -> std::expected<void, VkInitializationError>;
 
   size_t current_frame_index = 0;
 
@@ -107,11 +157,7 @@ private:
 
   std::thread render_thread;
 
-  VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-  std::vector<VkDescriptorSet> descriptor_sets;
-
-  VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
-  VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+  ShaderInterface shader_interface;
 
   VkCommandPool command_pool = VK_NULL_HANDLE;
 
@@ -139,8 +185,21 @@ private:
   std::vector<std::pair<VkFence, std::vector<CommandContext *>>>
       pending_submissions;
 
+  std::unordered_map<DescriptorBindingType, size_t>
+      persistent_descriptor_pool_budget;
+  std::unordered_map<DescriptorBindingType, size_t>
+      transient_descriptor_pool_budget;
+  size_t max_persistent_descriptor_sets = 0;
+  size_t max_transient_descriptor_sets = 0;
+
+  MaterialInstanceHandle default_material_instance_handle;
+
   RenderMeshManager render_mesh_manager;
+  MaterialTemplateManager material_template_manager;
+  MaterialInstanceManager material_instance_manager;
   GraphicsPipelineManager pipeline_manager;
+
+  VkDescriptorPool persistent_descriptor_pool = VK_NULL_HANDLE;
 };
 
 } // namespace lumina::renderer
