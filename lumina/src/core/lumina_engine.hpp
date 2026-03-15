@@ -1,13 +1,12 @@
 #pragma once
 
 #include <memory>
-#include <stdexcept>
 
+#include "common/logger/logger.hpp"
 #include "platform/common/vulkan/vulkan_init_result.hpp"
 
 #include "core/camera.hpp"
 #include "job_system/job_manager.hpp"
-#include "math/vector.hpp"
 #include "renderer/renderer.hpp"
 
 namespace lumina::core {
@@ -32,8 +31,8 @@ public:
   static auto Instance() -> LuminaEngine & {
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized) {
-      throw std::runtime_error(
-          "LuminaEngine not initialized, call Initialize() first");
+      LOG_CRITICAL("LuminaEngine not initialized, call Initialize() first");
+      std::terminate();
     }
     return instance;
   }

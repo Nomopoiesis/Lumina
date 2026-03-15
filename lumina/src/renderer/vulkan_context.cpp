@@ -318,6 +318,25 @@ auto VulkanContext::GetPresentQueue() const noexcept -> const VkQueue & {
   return present_queue;
 }
 
+auto VulkanContext::FindSupportedFormat(
+    const std::vector<VkFormat> &candidates, VkImageTiling tiling,
+    VkFormatFeatureFlags features) const noexcept
+    -> std::expected<VkFormat, VkInitializationError> {
+  for (const auto &format : candidates) {
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(physical_device, format, &properties);
+    if (tiling == VK_IMAGE_TILING_LINEAR &&
+        (properties.linearTilingFeatures & features) == features) {
+      return format;
+    } else if (tiling == VK_IMAGE_TILING_OPTIMAL &&
+               (properties.optimalTilingFeatures & features) == features) {
+      return format;
+    }
+  }
+  return std::unexpected(
+      VkInitializationError{.message = "Failed to find supported format"});
+}
+
 auto VulkanContext::GetSwapChainImageReadyToPresentSemaphore(
     u32 index) const noexcept -> const VkSemaphore & {
   return swap_chain_image_ready_to_present_semaphores[index];
@@ -593,7 +612,8 @@ auto VulkanContext::CreateSwapChainImageViews() noexcept
   image_views.resize(swap_chain_images.size());
   for (size_t i = 0; i < swap_chain_images.size(); i++) {
     auto create_image_view_result =
-        CreateImageView(swap_chain_images[i], swap_chain_image_format);
+        CreateImageView(swap_chain_images[i], swap_chain_image_format,
+                        VK_IMAGE_ASPECT_COLOR_BIT);
     if (!create_image_view_result) {
       return std::unexpected(create_image_view_result.error());
     }
@@ -602,7 +622,8 @@ auto VulkanContext::CreateSwapChainImageViews() noexcept
   return std::expected<void, VkInitializationError>{};
 }
 
-auto VulkanContext::CreateImageView(VkImage &image, VkFormat format)
+auto VulkanContext::CreateImageView(VkImage &image, VkFormat format,
+                                    VkImageAspectFlags aspect_mask)
     -> std::expected<VkImageView, VkInitializationError> {
   VkImageViewCreateInfo image_view_create_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -621,7 +642,7 @@ auto VulkanContext::CreateImageView(VkImage &image, VkFormat format)
           },
       .subresourceRange =
           {
-              .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+              .aspectMask = aspect_mask,
               .baseMipLevel = 0,
               .levelCount = 1,
               .baseArrayLayer = 0,

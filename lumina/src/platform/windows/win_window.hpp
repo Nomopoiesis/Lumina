@@ -23,7 +23,8 @@ public:
   static auto Instance() -> Window & {
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized) {
-      throw std::runtime_error("Window not initialized, call Create() first");
+      LOG_CRITICAL("Window not initialized, call Create() first");
+      std::terminate();
     }
     return instance;
   }

@@ -60,7 +60,6 @@ inline auto Quaternion::FromEulerAngles(Vec3 euler_angles) -> Quaternion {
 inline auto Quaternion::CreateRotationMatrix() const -> Mat3 {
   Mat3 result;
 
-  f32 ww = w * w;
   f32 xx = x * x;
   f32 yy = y * y;
   f32 zz = z * z;

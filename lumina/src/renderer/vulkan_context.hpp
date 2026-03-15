@@ -71,7 +71,8 @@ public:
   auto CreateCommandBuffer(VkCommandPool command_pool) const noexcept
       -> std::expected<VkCommandBuffer, VkInitializationError>;
 
-  auto CreateImageView(VkImage &image, VkFormat format)
+  auto CreateImageView(VkImage &image, VkFormat format,
+                       VkImageAspectFlags aspect_mask)
       -> std::expected<VkImageView, VkInitializationError>;
 
   auto RecreateSwapChain() noexcept
@@ -81,6 +82,11 @@ public:
       -> const VkPhysicalDeviceProperties & {
     return physical_device_properties;
   }
+
+  auto FindSupportedFormat(const std::vector<VkFormat> &candidates,
+                           VkImageTiling tiling,
+                           VkFormatFeatureFlags features) const noexcept
+      -> std::expected<VkFormat, VkInitializationError>;
 
 private:
   auto SelectPhysicalDevice() noexcept

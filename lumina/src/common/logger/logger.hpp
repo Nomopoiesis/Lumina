@@ -10,10 +10,12 @@
 #include <format>
 #include <memory>
 #include <mutex>
+#include <print>
 #include <queue>
 #include <string>
 #include <thread>
 #include <vector>
+
 
 namespace lumina::common::logger {
 
@@ -37,8 +39,8 @@ public:
   static auto Instance() -> Logger & {
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized_) {
-      throw std::runtime_error(
-          "Logger not initialized, call Initialize() first");
+      std::print("Logger not initialized, call Initialize() first");
+      std::terminate();
     }
     return instance;
   }
@@ -51,43 +53,44 @@ public:
   //   logs remain visible.
   // Core initialization overload with explicit file path, shutdown behavior,
   // and console color control.
-  static auto Initialize(
-      LogTargetType target_type,
-      lumina::platform::common::PlatformServices &platform_services,
-      const std::string &file_path,
-      bool wait_for_keypress_on_shutdown,
-      bool enable_console_colors) -> void;
+  static auto
+  Initialize(LogTargetType target_type,
+             lumina::platform::common::PlatformServices &platform_services,
+             const std::string &file_path, bool wait_for_keypress_on_shutdown,
+             bool enable_console_colors) -> void;
 
   // Backwards-compatible overload that defaults console colors to enabled.
-  static auto Initialize(
-      LogTargetType target_type,
-      lumina::platform::common::PlatformServices &platform_services,
-      const std::string &file_path,
-      bool wait_for_keypress_on_shutdown = false) -> void;
+  static auto
+  Initialize(LogTargetType target_type,
+             lumina::platform::common::PlatformServices &platform_services,
+             const std::string &file_path,
+             bool wait_for_keypress_on_shutdown = false) -> void;
 
   // Overload for default file path, no keypress wait
-  static auto Initialize(
-      LogTargetType target_type,
-      lumina::platform::common::PlatformServices &platform_services) -> void {
+  static auto
+  Initialize(LogTargetType target_type,
+             lumina::platform::common::PlatformServices &platform_services)
+      -> void {
     Initialize(target_type, platform_services, std::string{}, false,
                /*enable_console_colors*/ true);
   }
 
   // Overload for default file path with explicit keypress wait flag
-  static auto Initialize(
-      LogTargetType target_type,
-      lumina::platform::common::PlatformServices &platform_services,
-      bool wait_for_keypress_on_shutdown) -> void {
+  static auto
+  Initialize(LogTargetType target_type,
+             lumina::platform::common::PlatformServices &platform_services,
+             bool wait_for_keypress_on_shutdown) -> void {
     Initialize(target_type, platform_services, std::string{},
                wait_for_keypress_on_shutdown,
                /*enable_console_colors*/ true);
   }
 
   // Overload for default file path with explicit keypress and color flags.
-  static auto Initialize(
-      LogTargetType target_type,
-      lumina::platform::common::PlatformServices &platform_services,
-      bool wait_for_keypress_on_shutdown, bool enable_console_colors) -> void {
+  static auto
+  Initialize(LogTargetType target_type,
+             lumina::platform::common::PlatformServices &platform_services,
+             bool wait_for_keypress_on_shutdown, bool enable_console_colors)
+      -> void {
     Initialize(target_type, platform_services, std::string{},
                wait_for_keypress_on_shutdown, enable_console_colors);
   }

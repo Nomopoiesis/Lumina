@@ -3,7 +3,6 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
 #include "core/lumina_engine.hpp"
-#include "glm/fwd.hpp"
 #include "shaders/shader_module_cache.hpp"
 
 #include "math/matrix.hpp"
@@ -19,9 +18,7 @@
 #include <glm/gtx/quaternion.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
-#pragma warning(push, 0)
 #include "stb_image.h"
-#pragma warning(pop)
 #undef STB_IMAGE_IMPLEMENTATION
 
 namespace lumina::renderer {
@@ -33,7 +30,7 @@ struct UniformBufferObject {
 };
 
 struct Vertex {
-  math::Vec2 position;
+  math::Vec3 position;
   math::Vec3 color;
   math::Vec2 tex_coord;
 
@@ -51,7 +48,7 @@ struct Vertex {
         VkVertexInputAttributeDescription{
             .location = 0,
             .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
             .offset = offsetof(Vertex, position),
         },
         {
@@ -71,21 +68,34 @@ struct Vertex {
 };
 
 static const auto vertices = std::vector<Vertex>{
-    {.position = {-0.5F, 0.5F},
+    {.position = {-0.5F, 0.5F, 0.0F},
      .color = {1.0F, 1.0F, 1.0F},
      .tex_coord = {0.0F, 0.0F}},
-    {.position = {-0.5F, -0.5F},
+    {.position = {-0.5F, -0.5F, 0.0F},
      .color = {1.0F, 0.0F, 0.0F},
      .tex_coord = {0.0F, 1.0F}},
-    {.position = {0.5F, -0.5F},
+    {.position = {0.5F, -0.5F, 0.0F},
      .color = {0.0F, 1.0F, 0.0F},
      .tex_coord = {1.0F, 1.0F}},
-    {.position = {0.5F, 0.5F},
+    {.position = {0.5F, 0.5F, 0.0F},
+     .color = {0.0F, 0.0F, 1.0F},
+     .tex_coord = {1.0F, 0.0F}},
+
+    {.position = {-0.5F, 0.5F, -0.5F},
+     .color = {1.0F, 1.0F, 1.0F},
+     .tex_coord = {0.0F, 0.0F}},
+    {.position = {-0.5F, -0.5F, -0.5F},
+     .color = {1.0F, 0.0F, 0.0F},
+     .tex_coord = {0.0F, 1.0F}},
+    {.position = {0.5F, -0.5F, -0.5F},
+     .color = {0.0F, 1.0F, 0.0F},
+     .tex_coord = {1.0F, 1.0F}},
+    {.position = {0.5F, 0.5F, -0.5F},
      .color = {0.0F, 0.0F, 1.0F},
      .tex_coord = {1.0F, 0.0F}},
 };
 
-const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
+const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
 
 static auto
 CreateDescriptorSetLayout(VulkanContext &vulkan_context,
@@ -265,15 +275,30 @@ static auto CopyBufferToImage(VulkanContext &vulkan_context,
   return EndCommandBuffer(vulkan_context, command_pool, command_buffer);
 }
 
+static auto HasStencilComponent(VkFormat format) -> bool {
+  return format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+         format == VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
 static auto TransitionImageLayout(VulkanContext &vulkan_context,
                                   VkCommandPool &command_pool, VkImage image,
-                                  VkImageLayout old_layout,
+                                  VkFormat format, VkImageLayout old_layout,
                                   VkImageLayout new_layout) -> bool {
   auto command_buffer_result = BeginCommandBuffer(vulkan_context, command_pool);
   if (!command_buffer_result) {
     return false;
   }
   auto *command_buffer = command_buffer_result.value();
+
+  VkImageAspectFlags aspect_mask = 0;
+  if (new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+    aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (HasStencilComponent(format)) {
+      aspect_mask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+  } else {
+    aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+  }
 
   VkImageMemoryBarrier barrier = {};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -282,7 +307,7 @@ static auto TransitionImageLayout(VulkanContext &vulkan_context,
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image = image;
-  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.aspectMask = aspect_mask;
   barrier.subresourceRange.baseMipLevel = 0;
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.baseArrayLayer = 0;
@@ -294,12 +319,23 @@ static auto TransitionImageLayout(VulkanContext &vulkan_context,
   VkPipelineStageFlags destination_stage = 0;
   if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
       new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     destination_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
   } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
              new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  } else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+             new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    destination_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
   } else {
     LOG_ERROR("Unsupported image layout transition");
     return false;
@@ -375,7 +411,8 @@ static auto CreateVertexBuffer(VulkanContext &vulkan_context,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                     staging_buffer_memory, staging_buffer)) {
-    throw std::runtime_error("Failed to create vertex staging buffer");
+    LOG_CRITICAL("Failed to create vertex staging buffer");
+    std::terminate();
   }
 
   void *data = nullptr;
@@ -389,7 +426,8 @@ static auto CreateVertexBuffer(VulkanContext &vulkan_context,
                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory, buffer)) {
-    throw std::runtime_error("Failed to create vertex buffer");
+    LOG_CRITICAL("Failed to create vertex buffer");
+    std::terminate();
   }
   auto copy_result = DeviceCopyBuffer(vulkan_context, command_pool,
                                       staging_buffer, buffer, size);
@@ -412,7 +450,8 @@ static auto CreateIndexBuffer(VulkanContext &vulkan_context,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                     staging_buffer_memory, staging_buffer)) {
-    throw std::runtime_error("Failed to create index staging buffer");
+    LOG_CRITICAL("Failed to create index staging buffer");
+    std::terminate();
   }
 
   void *data = nullptr;
@@ -426,7 +465,8 @@ static auto CreateIndexBuffer(VulkanContext &vulkan_context,
                         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memory, buffer)) {
-    throw std::runtime_error("Failed to create index buffer");
+    LOG_CRITICAL("Failed to create index buffer");
+    std::terminate();
   }
   auto copy_result = DeviceCopyBuffer(vulkan_context, command_pool,
                                       staging_buffer, buffer, size);
@@ -564,7 +604,7 @@ static auto UpdateUniformBuffer(VulkanContext &vulkan_context, VkBuffer &buffer,
 }
 
 static auto CreateImage(VulkanContext &vulkan_context, VkImage &texture_image,
-                        int tex_width, int tex_height,
+                        u32 tex_width, u32 tex_height,
                         VkDeviceMemory &texture_image_memory, VkFormat format,
                         VkImageTiling tiling, VkImageUsageFlags usage,
                         VkMemoryPropertyFlags properties) -> bool {
@@ -572,9 +612,7 @@ static auto CreateImage(VulkanContext &vulkan_context, VkImage &texture_image,
   image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   image_info.imageType = VK_IMAGE_TYPE_2D;
   image_info.format = format;
-  image_info.extent = {.width = static_cast<uint32_t>(tex_width),
-                       .height = static_cast<uint32_t>(tex_height),
-                       .depth = 1};
+  image_info.extent = {.width = tex_width, .height = tex_height, .depth = 1};
   image_info.mipLevels = 1;
   image_info.arrayLayers = 1;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -640,21 +678,21 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
   vkUnmapMemory(vulkan_context.GetDevice(), staging_buffer_memory);
   stbi_image_free(pixels);
 
+  auto format = VK_FORMAT_R8G8B8A8_SRGB;
   if (!CreateImage(vulkan_context, texture_image, tex_width, tex_height,
-                   texture_image_memory, VK_FORMAT_R8G8B8A8_SRGB,
-                   VK_IMAGE_TILING_OPTIMAL,
+                   texture_image_memory, format, VK_IMAGE_TILING_OPTIMAL,
                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
     LOG_ERROR("Failed to create texture image");
     return false;
   }
 
-  TransitionImageLayout(vulkan_context, command_pool, texture_image,
+  TransitionImageLayout(vulkan_context, command_pool, texture_image, format,
                         VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
   CopyBufferToImage(vulkan_context, command_pool, staging_buffer, texture_image,
                     tex_width, tex_height);
-  TransitionImageLayout(vulkan_context, command_pool, texture_image,
+  TransitionImageLayout(vulkan_context, command_pool, texture_image, format,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
@@ -667,8 +705,8 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
 static auto CreateTextureImageView(VulkanContext &vulkan_context,
                                    VkImage &texture_image)
     -> std::expected<VkImageView, VkInitializationError> {
-  auto create_image_view_result =
-      vulkan_context.CreateImageView(texture_image, VK_FORMAT_R8G8B8A8_SRGB);
+  auto create_image_view_result = vulkan_context.CreateImageView(
+      texture_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
   if (!create_image_view_result) {
     LOG_ERROR("Failed to create texture image view: {}",
               create_image_view_result.error().message);
@@ -709,6 +747,39 @@ static auto CreateTextureSampler(VulkanContext &vulkan_context,
   return texture_sampler;
 }
 
+static auto FindDepthFormat(VulkanContext &vulkan_context)
+    -> std::expected<VkFormat, VkInitializationError> {
+  return vulkan_context.FindSupportedFormat(
+      {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
+       VK_FORMAT_D24_UNORM_S8_UINT},
+      VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+}
+
+static auto CreateDepthResources(VulkanContext &vulkan_context,
+                                 VkCommandPool &command_pool,
+                                 VkImage &depth_image,
+                                 VkImageView &depth_image_view,
+                                 VkDeviceMemory &depth_image_memory,
+                                 VkFormat &depth_stencil_format) -> bool {
+  auto depth_format = FindDepthFormat(vulkan_context);
+  ASSERT(depth_format, "Failed to find depth format");
+  depth_stencil_format = depth_format.value();
+  auto width = vulkan_context.GetSwapChainImageExtent().width;
+  auto height = vulkan_context.GetSwapChainImageExtent().height;
+  CreateImage(vulkan_context, depth_image, width, height, depth_image_memory,
+              depth_stencil_format, VK_IMAGE_TILING_OPTIMAL,
+              VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  auto depth_image_view_result = vulkan_context.CreateImageView(
+      depth_image, depth_format.value(), VK_IMAGE_ASPECT_DEPTH_BIT);
+  ASSERT(depth_image_view_result, "Failed to create depth image view");
+  depth_image_view = depth_image_view_result.value();
+  TransitionImageLayout(vulkan_context, command_pool, depth_image,
+                        depth_stencil_format, VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+  return true;
+}
+
 LuminaRenderer::LuminaRenderer(platform::common::vulkan::VkInitializationResult
                                    vulkan_init_result) noexcept
     : vulkan_context(this, vulkan_init_result.instance,
@@ -719,6 +790,16 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   // Clear frame contexts first so semaphores/fences and frame command buffers
   // are destroyed before the command pool.
   frame_contexts.clear();
+
+  if (depth_image_view != VK_NULL_HANDLE) {
+    vkDestroyImageView(vulkan_context.GetDevice(), depth_image_view, nullptr);
+  }
+  if (depth_image != VK_NULL_HANDLE) {
+    vkDestroyImage(vulkan_context.GetDevice(), depth_image, nullptr);
+  }
+  if (depth_image_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), depth_image_memory, nullptr);
+  }
 
   if (texture_sampler != VK_NULL_HANDLE) {
     vkDestroySampler(vulkan_context.GetDevice(), texture_sampler, nullptr);
@@ -787,36 +868,39 @@ LuminaRenderer::~LuminaRenderer() noexcept {
 auto LuminaRenderer::Initialize() -> void {
   LOG_TRACE("Initializing Lumina Vulkan Renderer...");
   if (!vulkan_context.Initialize()) {
-    LOG_ERROR("Failed to initialize Vulkan context: {}",
-              vulkan_context.Initialize().error().message);
-    vulkan_context.ResetContext();
-    throw std::runtime_error(vulkan_context.Initialize().error().message);
+    LOG_CRITICAL("Failed to initialize Vulkan context: {}",
+                 vulkan_context.Initialize().error().message);
+    std::terminate();
   }
+
+  auto command_pool_result = vulkan_context.CreateCommandPool();
+  if (!command_pool_result) {
+    LOG_CRITICAL("Failed to create command pool: {}",
+                 command_pool_result.error().message);
+    std::terminate();
+  }
+  command_pool = command_pool_result.value();
 
   auto desc_result =
       CreateDescriptorSetLayout(vulkan_context, descriptor_set_layout);
   ASSERT(desc_result, "Failed to create descriptor set layout");
 
   if (!CreatePipelineLayout()) {
-    LOG_ERROR("Failed to create pipeline layout: {}",
-              CreatePipelineLayout().error().message);
-    throw std::runtime_error(CreatePipelineLayout().error().message);
+    LOG_CRITICAL("Failed to create pipeline layout: {}",
+                 CreatePipelineLayout().error().message);
+    std::terminate();
   }
+
+  auto depth_result = CreateDepthResources(
+      vulkan_context, command_pool, depth_image, depth_image_view,
+      depth_image_memory, depth_stencil_format);
+  ASSERT(depth_result, "Failed to create depth resources");
 
   if (!CreatePipeline()) {
-    LOG_ERROR("Failed to create pipeline: {}",
-              CreatePipeline().error().message);
-    throw std::runtime_error(CreatePipeline().error().message);
+    LOG_CRITICAL("Failed to create pipeline: {}",
+                 CreatePipeline().error().message);
+    std::terminate();
   }
-
-  auto command_pool_result = vulkan_context.CreateCommandPool();
-  if (!command_pool_result) {
-    LOG_ERROR("Failed to create command pool: {}",
-              vulkan_context.CreateCommandPool().error().message);
-    throw std::runtime_error(
-        vulkan_context.CreateCommandPool().error().message);
-  }
-  command_pool = command_pool_result.value();
 
   auto res = CreateVertexBuffer(vulkan_context, command_pool,
                                 vertex_buffer_memory, vertex_buffer);
@@ -859,9 +943,9 @@ auto LuminaRenderer::Initialize() -> void {
     auto frame_context_result =
         FrameContext::Create(vulkan_context, command_pool);
     if (!frame_context_result) {
-      LOG_ERROR("Failed to create frame context: {}",
-                frame_context_result.error().message);
-      throw std::runtime_error(frame_context_result.error().message);
+      LOG_CRITICAL("Failed to create frame context: {}",
+                   frame_context_result.error().message);
+      std::terminate();
     }
     frame_contexts.push_back(std::move(frame_context_result.value()));
   }
@@ -886,14 +970,14 @@ auto LuminaRenderer::DrawFrame() -> void {
   if (result == VK_ERROR_OUT_OF_DATE_KHR) {
     auto recreate_swap_chain_result = vulkan_context.RecreateSwapChain();
     if (!recreate_swap_chain_result) {
-      LOG_ERROR("Failed to recreate swap chain: {}",
-                recreate_swap_chain_result.error().message);
-      throw std::runtime_error(recreate_swap_chain_result.error().message);
+      LOG_CRITICAL("Failed to recreate swap chain: {}",
+                   recreate_swap_chain_result.error().message);
+      std::terminate();
     }
     return;
   } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-    LOG_ERROR("Failed to acquire next image: {}", string_VkResult(result));
-    throw std::runtime_error("Failed to acquire next image");
+    LOG_CRITICAL("Failed to acquire next image: {}", string_VkResult(result));
+    std::terminate();
   }
 
   UpdateUniformBuffer(vulkan_context, uniform_buffers[current_frame_index],
@@ -903,16 +987,16 @@ auto LuminaRenderer::DrawFrame() -> void {
                 &frame_context.GetFrameBeginReadyFence());
 
   if (vkResetCommandBuffer(frame_context.GetCommandBuffer(), 0) != VK_SUCCESS) {
-    LOG_ERROR("Failed to reset command buffer");
-    throw std::runtime_error("Failed to reset command buffer");
+    LOG_CRITICAL("Failed to reset command buffer");
+    std::terminate();
   }
 
   if (auto record_command_buffer_result =
           RecordCommandBuffer(frame_context, image_index);
       !record_command_buffer_result) {
-    LOG_ERROR("Failed to record command buffer: {}",
-              record_command_buffer_result.error().message);
-    throw std::runtime_error(record_command_buffer_result.error().message);
+    LOG_CRITICAL("Failed to record command buffer: {}",
+                 record_command_buffer_result.error().message);
+    std::terminate();
   }
 
   VkPipelineStageFlags wait_stage_flags[] = {
@@ -933,8 +1017,8 @@ auto LuminaRenderer::DrawFrame() -> void {
 
   if (vkQueueSubmit(vulkan_context.GetGraphicsQueue(), 1, &submit_info,
                     frame_context.GetFrameBeginReadyFence()) != VK_SUCCESS) {
-    LOG_ERROR("Failed to submit command buffer");
-    throw std::runtime_error("Failed to submit command buffer");
+    LOG_CRITICAL("Failed to submit command buffer");
+    std::terminate();
   }
 
   VkPresentInfoKHR present_info = {
@@ -955,13 +1039,13 @@ auto LuminaRenderer::DrawFrame() -> void {
     SetFramebufferResized(false);
     auto recreate_swap_chain_result = vulkan_context.RecreateSwapChain();
     if (!recreate_swap_chain_result) {
-      LOG_ERROR("Failed to recreate swap chain: {}",
-                recreate_swap_chain_result.error().message);
-      throw std::runtime_error(recreate_swap_chain_result.error().message);
+      LOG_CRITICAL("Failed to recreate swap chain: {}",
+                   recreate_swap_chain_result.error().message);
+      std::terminate();
     }
   } else if (result != VK_SUCCESS) {
-    LOG_ERROR("Failed to present image: {}", string_VkResult(result));
-    throw std::runtime_error("Failed to present image");
+    LOG_CRITICAL("Failed to present image: {}", string_VkResult(result));
+    std::terminate();
   }
 
   current_frame_index = (current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -1126,6 +1210,23 @@ auto LuminaRenderer::CreatePipeline()
   pipeline_dynamic_rendering_info.colorAttachmentCount = 1;
   pipeline_dynamic_rendering_info.pColorAttachmentFormats =
       &vulkan_context.GetSwapChainImageFormat();
+  pipeline_dynamic_rendering_info.depthAttachmentFormat = depth_stencil_format;
+  pipeline_dynamic_rendering_info.stencilAttachmentFormat =
+      HasStencilComponent(depth_stencil_format) ? depth_stencil_format
+                                                : VK_FORMAT_UNDEFINED;
+
+  VkPipelineDepthStencilStateCreateInfo depth_stencil_state_create_info{};
+  depth_stencil_state_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depth_stencil_state_create_info.depthTestEnable = VK_TRUE;
+  depth_stencil_state_create_info.depthWriteEnable = VK_TRUE;
+  depth_stencil_state_create_info.depthCompareOp = VK_COMPARE_OP_LESS;
+  depth_stencil_state_create_info.depthBoundsTestEnable = VK_FALSE;
+  depth_stencil_state_create_info.stencilTestEnable = VK_FALSE;
+  depth_stencil_state_create_info.front = {};
+  depth_stencil_state_create_info.back = {};
+  depth_stencil_state_create_info.minDepthBounds = 0.0F;
+  depth_stencil_state_create_info.maxDepthBounds = 1.0F;
 
   VkGraphicsPipelineCreateInfo pipeline_create_info{
       .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -1138,7 +1239,7 @@ auto LuminaRenderer::CreatePipeline()
       .pViewportState = &viewport_state_create_info,
       .pRasterizationState = &rasterization_state_create_info,
       .pMultisampleState = &multisample_state_create_info,
-      .pDepthStencilState = nullptr,
+      .pDepthStencilState = &depth_stencil_state_create_info,
       .pColorBlendState = &color_blend_state_create_info,
       .pDynamicState = &dynamic_state_create_info,
       .layout = pipeline_layout,
@@ -1175,7 +1276,36 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
         VkInitializationError{.message = "Failed to begin command buffer"});
   }
 
-  // Transition from PRESENT_SRC_KHR (from previous frame) to
+  VkImageMemoryBarrier depth_image_memory_barrier = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .pNext = nullptr,
+      .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+      .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = depth_image,
+      .subresourceRange =
+          {
+              .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT |
+                            (HasStencilComponent(depth_stencil_format)
+                                 ? VK_IMAGE_ASPECT_STENCIL_BIT
+                                 : 0U),
+              .baseMipLevel = 0,
+              .levelCount = 1,
+              .baseArrayLayer = 0,
+              .layerCount = 1,
+          },
+  };
+  vkCmdPipelineBarrier(command_buffer,
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                           VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0,
+                       nullptr, 0, nullptr, 1, &depth_image_memory_barrier);
+
+  // Transition from VK_IMAGE_LAYOUT_UNDEFINED (from previous frame) to
   // COLOR_ATTACHMENT_OPTIMAL
   VkImageMemoryBarrier image_memory_barrier = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1202,7 +1332,7 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
                        nullptr, 0, nullptr, 1, &image_memory_barrier);
 
   auto swap_chain_image_extent = vulkan_context.GetSwapChainImageExtent();
-  VkRenderingAttachmentInfoKHR rendering_attachment_info = {
+  VkRenderingAttachmentInfo color_attachment_info = {
       .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
       .pNext = nullptr,
       .imageView = vulkan_context.GetSwapChainImageView(image_index),
@@ -1211,7 +1341,17 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
       .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
   };
 
-  VkRenderingInfoKHR rendering_info = {
+  VkRenderingAttachmentInfo depth_attachment_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+      .pNext = nullptr,
+      .imageView = depth_image_view,
+      .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+      .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+      .clearValue = {.depthStencil = {.depth = 1.0F, .stencil = 0}},
+  };
+
+  VkRenderingInfo rendering_info = {
       .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
       .pNext = nullptr,
       .renderArea =
@@ -1221,9 +1361,11 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
           },
       .layerCount = 1,
       .colorAttachmentCount = 1,
-      .pColorAttachments = &rendering_attachment_info,
-      .pDepthAttachment = nullptr,
-      .pStencilAttachment = nullptr,
+      .pColorAttachments = &color_attachment_info,
+      .pDepthAttachment = &depth_attachment_info,
+      .pStencilAttachment = HasStencilComponent(depth_stencil_format)
+                                ? &depth_attachment_info
+                                : nullptr,
   };
 
   vkCmdBeginRendering(command_buffer, &rendering_info);

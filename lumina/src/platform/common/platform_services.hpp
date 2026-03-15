@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstddef>
-#include <stdexcept>
+#include <print>
 #include <thread>
 
 namespace lumina::platform::common {
@@ -14,16 +14,16 @@ public:
   // Delete copy and move constructors/operators
   PlatformServices(const PlatformServices &) = delete;
   auto operator=(const PlatformServices &) -> PlatformServices & = delete;
-  PlatformServices(PlatformServices &&) noexcept = delete;
-  auto operator=(PlatformServices &&) noexcept -> PlatformServices & = delete;
+  PlatformServices(PlatformServices &&) = delete;
+  auto operator=(PlatformServices &&) -> PlatformServices & = delete;
 
   // Get the singleton instance
   // Throws if not initialized
   static auto Instance() -> PlatformServices & {
     auto &instance = GetStaticInstance();
     if (!instance.is_initialized_) {
-      throw std::runtime_error(
-          "PlatformServices not initialized, call Initialize() first");
+      std::print("PlatformServices not initialized, call Initialize() first");
+      std::terminate();
     }
     return instance;
   }
@@ -133,7 +133,7 @@ public:
   void (*LuminaSwitchToFiber)(void *from_fiber, void *to_fiber) = nullptr;
 
 private:
-  PlatformServices() noexcept = default;
+  PlatformServices() = default;
   ~PlatformServices() = default;
 
   static auto GetStaticInstance() -> PlatformServices & {
