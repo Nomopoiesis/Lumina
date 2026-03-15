@@ -6,6 +6,8 @@
 #include "core/lumina_engine.hpp"
 #include "shaders/shader_module_cache.hpp"
 
+#include "core/components/camera.hpp"
+#include "core/components/transform.hpp"
 #include "math/matrix.hpp"
 #include "math/vector.hpp"
 #include <vulkan/vk_enum_string_helper.h>
@@ -594,11 +596,14 @@ static auto CreateUniformBuffer(VulkanContext &vulkan_context,
 
 static auto UpdateUniformBuffer(VulkanContext &vulkan_context, VkBuffer &buffer,
                                 void *&mapped_data) -> bool {
-  auto camera = core::LuminaEngine::Instance().GetCamera();
+  auto &world = core::LuminaEngine::Instance().GetCurrentWorld();
+  auto camera_id = world.GetActiveCamera();
+  auto transform = world.GetComponent<core::components::Transform>(camera_id);
+  auto camera = world.GetComponent<core::components::Camera>(camera_id);
   UniformBufferObject ubo = {};
   ubo.model = math::Mat4::Identity();
-  ubo.view = camera.GetViewMatrix();
-  ubo.proj = camera.GetProjectionMatrix();
+  ubo.view = CalculateViewMatrix(transform);
+  ubo.proj = camera.ToProjectionMatrix();
   ubo.proj[1][1] *= -1;
   memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
