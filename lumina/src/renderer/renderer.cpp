@@ -9,7 +9,8 @@ namespace lumina::renderer {
 
 LuminaRenderer::LuminaRenderer(platform::common::vulkan::VkInitializationResult
                                    vulkan_init_result) noexcept
-    : vulkan_context(vulkan_init_result.instance, vulkan_init_result.surface) {}
+    : vulkan_context(this, vulkan_init_result.instance,
+                     vulkan_init_result.surface) {}
 
 LuminaRenderer::~LuminaRenderer() noexcept {
   LOG_TRACE("Destroying Lumina Vulkan Renderer...");
@@ -86,7 +87,15 @@ auto LuminaRenderer::DrawFrame() -> void {
   VkResult result = vkAcquireNextImageKHR(
       vulkan_context.GetDevice(), vulkan_context.GetSwapChain(), UINT64_MAX,
       frame_context.GetFrameBeginSemaphore(), VK_NULL_HANDLE, &image_index);
-  if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+  if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    auto recreate_swap_chain_result = vulkan_context.RecreateSwapChain();
+    if (!recreate_swap_chain_result) {
+      LOG_ERROR("Failed to recreate swap chain: {}",
+                recreate_swap_chain_result.error().message);
+      throw std::runtime_error(recreate_swap_chain_result.error().message);
+    }
+    return;
+  } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
     LOG_ERROR("Failed to acquire next image: {}", string_VkResult(result));
     throw std::runtime_error("Failed to acquire next image");
   }
@@ -142,7 +151,16 @@ auto LuminaRenderer::DrawFrame() -> void {
   };
 
   result = vkQueuePresentKHR(vulkan_context.GetPresentQueue(), &present_info);
-  if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+  if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR ||
+      IsFramebufferResized()) {
+    SetFramebufferResized(false);
+    auto recreate_swap_chain_result = vulkan_context.RecreateSwapChain();
+    if (!recreate_swap_chain_result) {
+      LOG_ERROR("Failed to recreate swap chain: {}",
+                recreate_swap_chain_result.error().message);
+      throw std::runtime_error(recreate_swap_chain_result.error().message);
+    }
+  } else if (result != VK_SUCCESS) {
     LOG_ERROR("Failed to present image: {}", string_VkResult(result));
     throw std::runtime_error("Failed to present image");
   }

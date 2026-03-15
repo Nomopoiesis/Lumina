@@ -14,6 +14,11 @@ public:
   LuminaRenderer(platform::common::vulkan::VkInitializationResult
                      vulkan_init_result) noexcept;
 
+  LuminaRenderer(const LuminaRenderer &) = delete;
+  auto operator=(const LuminaRenderer &) -> LuminaRenderer & = delete;
+  LuminaRenderer(LuminaRenderer &&) noexcept = delete;
+  auto operator=(LuminaRenderer &&) noexcept -> LuminaRenderer & = delete;
+
   ~LuminaRenderer() noexcept;
 
   auto Initialize() -> void;
@@ -21,6 +26,13 @@ public:
   auto DrawFrame() -> void;
 
   auto DeviceWaitIdle() -> void;
+
+  auto SetFramebufferResized(bool resized) -> void {
+    is_framebuffer_resized = resized;
+  }
+  [[nodiscard]] auto IsFramebufferResized() const -> bool {
+    return is_framebuffer_resized;
+  }
 
 private:
   auto CreatePipelineLayout() -> std::expected<void, VkInitializationError>;
@@ -32,6 +44,8 @@ private:
 
   static constexpr size_t MAX_FRAMES_IN_FLIGHT = 2;
   size_t current_frame_index = 0;
+
+  bool is_framebuffer_resized = false;
 
   VulkanContext vulkan_context;
 
