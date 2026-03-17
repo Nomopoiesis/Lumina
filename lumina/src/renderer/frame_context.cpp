@@ -41,6 +41,11 @@ FrameContext::~FrameContext() noexcept {
                    nullptr);
   }
 
+  if (frame_transient_descriptor_pool != VK_NULL_HANDLE) {
+    vkDestroyDescriptorPool(vulkan_context.GetDevice(),
+                            frame_transient_descriptor_pool, nullptr);
+  }
+
   if (uniform_buffer.mapped != nullptr) {
     vkUnmapMemory(vulkan_context.GetDevice(), uniform_buffer.memory);
   }

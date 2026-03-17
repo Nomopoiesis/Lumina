@@ -5,6 +5,7 @@
 #include "lumina_assert.hpp"
 #include "lumina_types.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -176,6 +177,41 @@ static auto StageEnumString(const std::string &stage) -> std::string {
   return "Unknown";
 }
 
+static auto AttributeTypeFromName(const std::string &name) -> std::string {
+  std::string lower = name;
+  std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+  if (lower.find("pos") != std::string::npos)
+    return "lumina::core::VertexAttributeType::Position";
+  if (lower.find("norm") != std::string::npos ||
+      lower.find("nrm") != std::string::npos)
+    return "lumina::core::VertexAttributeType::Normal";
+  if (lower.find("color") != std::string::npos ||
+      lower.find("col") != std::string::npos)
+    return "lumina::core::VertexAttributeType::Color";
+  if (lower.find("tex") != std::string::npos ||
+      lower.find("uv") != std::string::npos)
+    return "lumina::core::VertexAttributeType::TexCoord";
+  ASSERT(false, "Unrecognized vertex input variable name — add a naming "
+                "convention match");
+  return "lumina::core::VertexAttributeType::Position";
+}
+
+static auto ElementTypeFromFormat(SpvReflectFormat format) -> std::string {
+  switch (format) {
+    case SPV_REFLECT_FORMAT_R32_SFLOAT:
+      return "lumina::core::ElementType::Float";
+    case SPV_REFLECT_FORMAT_R32G32_SFLOAT:
+      return "lumina::core::ElementType::Vec2";
+    case SPV_REFLECT_FORMAT_R32G32B32_SFLOAT:
+      return "lumina::core::ElementType::Vec3";
+    case SPV_REFLECT_FORMAT_R32G32B32A32_SFLOAT:
+      return "lumina::core::ElementType::Vec4";
+    default:
+      ASSERT(false, "Unsupported vertex input format");
+      return "lumina::core::ElementType::Float";
+  }
+}
+
 static auto ReadSpvFile(const std::string &path) -> std::vector<uint32_t> {
   std::ifstream file(path, std::ios::binary | std::ios::ate);
   if (!file) {
@@ -226,6 +262,9 @@ auto main(int argc, char **argv) -> int {
   // Populated during push constant struct generation pass below
   std::string push_constant_struct_name;
   uint32_t push_constant_offset = 0;
+
+  // Populated during vertex input variable pass below (vertex stage only)
+  uint32_t vertex_input_count = 0;
 
   // --- Code generation ---
 
@@ -321,9 +360,9 @@ auto main(int argc, char **argv) -> int {
 
       if (member->padded_size > member->size) {
         const uint32_t pad_bytes = member->padded_size - member->size;
-        struct_.Add<cppgen::ArrayVariable>(
-            "uint8_t", "_pad" + std::to_string(pad_index++),
-            std::to_string(pad_bytes));
+        struct_.Add<cppgen::ArrayVariable>("uint8_t",
+                                           "_pad" + std::to_string(pad_index++),
+                                           std::to_string(pad_bytes));
         current_offset += pad_bytes;
       }
     }
@@ -357,7 +396,7 @@ auto main(int argc, char **argv) -> int {
         auto &entry = bindings_array.AddEntry();
         entry.AddValue("set", std::to_string(binding->set));
         entry.AddValue("binding", std::to_string(binding->binding));
-        entry.AddValue("type", "lumina::renderer::BindingType::" +
+        entry.AddValue("type", "lumina::renderer::DescriptorBindingType::" +
                                    BindingTypeString(binding->descriptor_type));
         entry.AddValue("name", "\"" + std::string(binding->name) + "\"");
         entry.AddValue("block_size", block_size);
@@ -367,7 +406,44 @@ auto main(int argc, char **argv) -> int {
     ns.Add<cppgen::NewLine>();
   }
 
-  // 4. kLayout constexpr variable
+  // 4. kVertexInputs array (vertex stage only)
+  if (stage == "vert") {
+    uint32_t input_var_count = 0;
+    spvReflectEnumerateInputVariables(&module, &input_var_count, nullptr);
+    std::vector<SpvReflectInterfaceVariable *> input_vars(input_var_count);
+    spvReflectEnumerateInputVariables(&module, &input_var_count,
+                                      input_vars.data());
+
+    // Filter out built-ins (gl_VertexIndex, gl_Position, etc.)
+    std::vector<SpvReflectInterfaceVariable *> user_inputs;
+    for (auto *var : input_vars) {
+      if ((var->decoration_flags & SPV_REFLECT_DECORATION_BUILT_IN) != 0u)
+        continue;
+      user_inputs.push_back(var);
+    }
+
+    // Sort by location ascending
+    std::sort(user_inputs.begin(), user_inputs.end(),
+              [](auto *a, auto *b) { return a->location < b->location; });
+
+    vertex_input_count = static_cast<uint32_t>(user_inputs.size());
+
+    if (vertex_input_count > 0) {
+      auto &inputs_array = ns.Add<cppgen::ArrayVariable>(
+          "lumina::renderer::VertexInputInfo", "kVertexInputs");
+      inputs_array.AddSpecifiers("static", "constexpr");
+
+      for (auto *var : user_inputs) {
+        auto &entry = inputs_array.AddEntry();
+        entry.AddValue("location", std::to_string(var->location));
+        entry.AddValue("attribute_type", AttributeTypeFromName(var->name));
+        entry.AddValue("element_type", ElementTypeFromFormat(var->format));
+      }
+      ns.Add<cppgen::NewLine>();
+    }
+  }
+
+  // 5. kLayout constexpr variable
   {
     const std::string bindings_ptr =
         (total_binding_count > 0) ? "kBindings" : "nullptr";
@@ -375,13 +451,18 @@ auto main(int argc, char **argv) -> int {
         push_constant_struct_name.empty()
             ? "0"
             : ("sizeof(" + push_constant_struct_name + ")");
+    const std::string vertex_input_layout_str =
+        (vertex_input_count > 0)
+            ? ("{ .input_count = " + std::to_string(vertex_input_count) +
+               ", .inputs = kVertexInputs }")
+            : "{}";
     const std::string layout_init =
         "{ .stage = " + StageEnumString(stage) +
         ", .bindings = " + bindings_ptr +
         ", .binding_count = " + std::to_string(total_binding_count) +
         ", .push_constant_size = " + push_constant_size_str +
         ", .push_constant_offset = " + std::to_string(push_constant_offset) +
-        " }";
+        ", .vertex_input_layout = " + vertex_input_layout_str + " }";
 
     auto &layout_var =
         ns.Add<cppgen::Variable>("lumina::renderer::ShaderLayout", "kLayout");

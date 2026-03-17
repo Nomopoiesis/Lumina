@@ -2,6 +2,7 @@
 
 #include "graphics_pipeline_handle.hpp"
 
+#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace lumina::renderer {
@@ -33,6 +34,5 @@ public:
 };
 
 using RenderMeshHandle = core::ResourceHandle<RenderMesh>;
-using RenderMeshManager = core::ResourceManager<RenderMesh>;
 
 } // namespace lumina::renderer

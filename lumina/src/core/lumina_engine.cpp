@@ -1,6 +1,7 @@
 #include "lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
+#include "standard_lit.vert.gen.hpp"
 
 #include "basic_geometry.hpp"
 #include "components/camera.hpp"
@@ -58,6 +59,14 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
 
+  auto mat_handle = instance.renderer->GetDefaultMaterialInstanceHandle();
+  auto mat_opt = instance.renderer->GetMaterialInstance(mat_handle);
+  if (!mat_opt.has_value()) {
+    LOG_CRITICAL("Failed to get default material instance");
+    LUMINA_TERMINATE();
+  }
+  auto mat_template_handle = mat_opt.value().GetTemplateHandle();
+
   instance.default_pipeline_handle = instance.renderer->CreateGraphicsPipeline(
       {.vertex_layout = renderer::VertexBufferLayout::Interleave(
            std::span<const VertexAttribute>(
@@ -66,7 +75,8 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                 VertexAttribute{.type = VertexAttributeType::Color,
                                 .element_type = ElementType::Vec3},
                 VertexAttribute{.type = VertexAttributeType::TexCoord,
-                                .element_type = ElementType::Vec2}}))});
+                                .element_type = ElementType::Vec2}})),
+       .material_template = mat_template_handle});
 
   instance.camera_movement_controller =
       std::make_unique<CameraMovementController>(INVALID_ENTITY_ID);
@@ -206,6 +216,8 @@ auto LuminaEngine::ExecuteFrame() -> void {
           }
           frame_context->render_draw_list.push_back(
               {.render_mesh_handle = mesh->render_mesh_handle,
+               .material_instance =
+                   engine->renderer->GetDefaultMaterialInstanceHandle(),
                .model = transform.GetModelMatrix()});
         });
   };

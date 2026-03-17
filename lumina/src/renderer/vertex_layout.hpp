@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/static_mesh.hpp"
+#include "core/vertex_attribute.hpp"
 
 #include <span>
 #include <vector>

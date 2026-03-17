@@ -2,7 +2,7 @@
 // the standard lit pipeline (texture sampler, color/texcoord varyings).
 // Do NOT add #version or main() here.
 
-layout(binding = 1, set = 0) uniform sampler2D texSampler;
+layout(set = 1, binding = 0) uniform sampler2D texSampler;
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;

@@ -2,7 +2,7 @@
 // standard lit pipeline (UBO view/proj, push constant model, pos/color/tex).
 // Do NOT add #version or main() here.
 
-layout(binding = 0, set = 0, row_major) uniform UniformBufferObject {
+layout(set = 0, binding = 0, row_major) uniform UniformBufferObject {
   mat4 view;
   mat4 proj;
 }

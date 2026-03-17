@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/resource_manager.hpp"
+#include "core/resource_manager_handle.hpp"
 
 namespace lumina::renderer {
 

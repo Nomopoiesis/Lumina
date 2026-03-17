@@ -1,9 +1,10 @@
 #include "shader_interface.hpp"
 
+#include "shader_vk_helpers.hpp"
+
 #include <map>
 #include <vector>
 
-#include "common/lumina_assert.hpp"
 #include <vulkan/vk_enum_string_helper.h>
 
 namespace lumina::renderer {
@@ -14,30 +15,6 @@ struct BindingInfo {
   VkShaderStageFlags stage_flags;
   u32 array_count;
 };
-
-static auto ToVkDescriptorType(BindingType type) -> VkDescriptorType {
-  switch (type) {
-    case BindingType::UniformBuffer:
-      return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    case BindingType::Sampler:
-      return VK_DESCRIPTOR_TYPE_SAMPLER;
-    case BindingType::CombinedImageSampler:
-      return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    case BindingType::SampledImage:
-      return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    case BindingType::StorageImage:
-      return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    case BindingType::UniformTexelBuffer:
-      return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-    case BindingType::StorageTexelBuffer:
-      return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
-    case BindingType::StorageBuffer:
-      return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    default:
-      ASSERT(false, "Unsupported binding type");
-      return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  }
-}
 
 static auto CreateEmptyDescriptorSetLayout(VkDevice device)
     -> std::expected<VkDescriptorSetLayout, ShaderInterfaceCreateError> {
@@ -138,10 +115,12 @@ ShaderInterface::ShaderInterface(ShaderInterface &&other) noexcept
     : m_device(other.m_device),
       descriptor_set_layouts(std::move(other.descriptor_set_layouts)),
       set_indices(std::move(other.set_indices)),
+      vertex_input_layout(other.vertex_input_layout),
       pipeline_layout(other.pipeline_layout) {
   other.m_device = VK_NULL_HANDLE;
   other.descriptor_set_layouts.clear();
   other.set_indices.clear();
+  other.vertex_input_layout = {};
   other.pipeline_layout = VK_NULL_HANDLE;
 }
 
@@ -151,10 +130,12 @@ auto ShaderInterface::operator=(ShaderInterface &&other) noexcept
     m_device = other.m_device;
     descriptor_set_layouts = std::move(other.descriptor_set_layouts);
     set_indices = std::move(other.set_indices);
+    vertex_input_layout = other.vertex_input_layout;
     pipeline_layout = other.pipeline_layout;
     other.m_device = VK_NULL_HANDLE;
     other.descriptor_set_layouts.clear();
     other.set_indices.clear();
+    other.vertex_input_layout = {};
     other.pipeline_layout = VK_NULL_HANDLE;
   }
   return *this;
@@ -272,6 +253,8 @@ auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
     return std::unexpected(pipeline_layout_result.error());
   }
   shader_interface.pipeline_layout = pipeline_layout_result.value();
+
+  shader_interface.vertex_input_layout = vertex_layout.vertex_input_layout;
 
   return shader_interface;
 }

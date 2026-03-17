@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/data_structures/data_buffer.hpp"
+#include "core/static_mesh.hpp"
 #include "vertex_layout.hpp"
 
 namespace lumina::renderer {

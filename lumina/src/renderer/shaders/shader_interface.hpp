@@ -44,11 +44,16 @@ public: // instance methods
     return pipeline_layout;
   }
 
+  [[nodiscard]] auto GetVertexInputLayout() const -> const VertexInputLayout & {
+    return vertex_input_layout;
+  }
+
 private: // instance members
   VkDevice m_device = VK_NULL_HANDLE;
   std::vector<u32>
       set_indices; // corresponds to the set index in the descriptor set layouts
   std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
+  VertexInputLayout vertex_input_layout;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 };
 
