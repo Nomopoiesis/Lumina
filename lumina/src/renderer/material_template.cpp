@@ -7,24 +7,19 @@
 
 namespace lumina::renderer {
 
-auto MaterialTemplate::Create(const MaterialTemplateDescription &description)
+auto MaterialTemplate::Create(const std::string &vertex_shader_bin_path,
+                              const std::string &fragment_shader_bin_path,
+                              ShaderInterface &shader_interface)
     -> std::expected<MaterialTemplate, MaterialTemplateCreateError> {
-  if (description.shader_interface == nullptr) {
-    return std::unexpected(
-        MaterialTemplateCreateError{.message = "Shader interface is required"});
-  }
-
-  if (description.vertex_shader_bin_path.empty() ||
-      description.fragment_shader_bin_path.empty()) {
+  if (vertex_shader_bin_path.empty() || fragment_shader_bin_path.empty()) {
     return std::unexpected(MaterialTemplateCreateError{
         .message = "Vertex and fragment shader binary paths are required"});
   }
 
   MaterialTemplate material_template;
-  material_template.shader_interface = description.shader_interface;
-  material_template.vertex_shader_bin_path = description.vertex_shader_bin_path;
-  material_template.fragment_shader_bin_path =
-      description.fragment_shader_bin_path;
+  material_template.shader_interface = &shader_interface;
+  material_template.vertex_shader_bin_path = vertex_shader_bin_path;
+  material_template.fragment_shader_bin_path = fragment_shader_bin_path;
   return material_template;
 }
 

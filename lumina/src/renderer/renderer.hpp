@@ -78,6 +78,13 @@ public:
 
   auto AcquireCommandContext() -> CommandContext &;
 
+  auto AddShaderInterface(ShaderInterface &&shader_interface) -> size_t {
+    auto name = shader_interface.GetName();
+    shader_interfaces.push_back(std::move(shader_interface));
+    shader_interface_name_map[name] = shader_interfaces.size() - 1;
+    return shader_interfaces.size() - 1;
+  }
+
   auto CreateMaterialTemplate(const MaterialTemplateDescription &desc)
       -> MaterialTemplateHandle;
 
@@ -114,6 +121,15 @@ public:
       return std::nullopt;
     }
     return GetMaterialTemplate(instance_opt.value().GetTemplateHandle());
+  }
+
+  auto SetDefaultMaterialTemplate(MaterialTemplateHandle handle) -> void {
+    default_material_template_handle = handle;
+  }
+
+  [[nodiscard]] auto GetGlobalDescriptorSetLayout() const noexcept
+      -> VkDescriptorSetLayout {
+    return global_descriptor_set_layout;
   }
 
 private:
@@ -157,7 +173,8 @@ private:
 
   std::thread render_thread;
 
-  ShaderInterface shader_interface;
+  std::unordered_map<std::string, size_t> shader_interface_name_map;
+  std::vector<ShaderInterface> shader_interfaces;
 
   VkCommandPool command_pool = VK_NULL_HANDLE;
 
@@ -187,11 +204,9 @@ private:
 
   std::unordered_map<DescriptorBindingType, size_t>
       persistent_descriptor_pool_budget;
-  std::unordered_map<DescriptorBindingType, size_t>
-      transient_descriptor_pool_budget;
   size_t max_persistent_descriptor_sets = 0;
-  size_t max_transient_descriptor_sets = 0;
 
+  MaterialTemplateHandle default_material_template_handle;
   MaterialInstanceHandle default_material_instance_handle;
 
   RenderMeshManager render_mesh_manager;
@@ -200,6 +215,12 @@ private:
   GraphicsPipelineManager pipeline_manager;
 
   VkDescriptorPool persistent_descriptor_pool = VK_NULL_HANDLE;
+
+  VkDescriptorSetLayout global_descriptor_set_layout = VK_NULL_HANDLE;
+  VkPipelineLayout global_pipeline_layout = VK_NULL_HANDLE;
+
+  friend auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
+      -> std::expected<void, VkInitializationError>;
 };
 
 } // namespace lumina::renderer

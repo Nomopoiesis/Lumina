@@ -20,6 +20,7 @@ enum class DescriptorBindingType : u8 {
 enum class ShaderStage : u8 {
   Vertex,
   Fragment,
+  Global,
 };
 
 // Describes a single descriptor binding within a descriptor set.

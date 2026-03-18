@@ -1,5 +1,7 @@
 #version 450
 
+#include "interface.global.glsl"
+
 #include "../interfaces/standard_lit.vert.glsl"
 
 void main() {

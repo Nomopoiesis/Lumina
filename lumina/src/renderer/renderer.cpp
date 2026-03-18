@@ -11,12 +11,11 @@
 #include "material_template.hpp"
 #include "shaders/shader_module_cache.hpp"
 #include "shaders/shader_vk_helpers.hpp"
-#include "standard_lit.frag.gen.hpp"
-#include "standard_lit.vert.gen.hpp"
 #include "vertex_layout.hpp"
 #include "vertex_serializer.hpp"
 
-#include "math/vector.hpp"
+#include "shaders/shader_gen/static_shader_api.hpp"
+
 #include <vulkan/vk_enum_string_helper.h>
 
 #include <array>
@@ -390,6 +389,7 @@ auto LuminaRenderer::CreateDescriptorPools()
 
   // Create persistent descriptor pool
   std::vector<VkDescriptorPoolSize> persistent_pool_sizes;
+  persistent_pool_sizes.reserve(persistent_descriptor_pool_budget.size());
   for (auto &[type, count] : persistent_descriptor_pool_budget) {
     persistent_pool_sizes.push_back({
         .type = ToVkDescriptorType(type),
@@ -416,37 +416,29 @@ auto LuminaRenderer::CreateDescriptorPools()
     }
   }
 
-  // Create transient descriptor pool (per frame)
+  // Create transient descriptor pool (per frame) from the global interface.
   std::vector<VkDescriptorPoolSize> transient_pool_sizes;
-  for (auto &[type, count] : transient_descriptor_pool_budget) {
-    transient_pool_sizes.push_back({
-        .type = ToVkDescriptorType(type),
-        .descriptorCount = SafeU64ToU32(count),
-    });
-  }
+  GetGlobalDescriptorPoolSizes(transient_pool_sizes);
 
-  if (!transient_pool_sizes.empty()) {
-    VkDescriptorPoolCreateInfo transient_pool_info = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .maxSets = SafeU64ToU32(max_transient_descriptor_sets),
-        .poolSizeCount = static_cast<u32>(transient_pool_sizes.size()),
-        .pPoolSizes = transient_pool_sizes.data(),
-    };
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-      VkDescriptorPool transient_descriptor_pool = VK_NULL_HANDLE;
-      if (auto result = vkCreateDescriptorPool(vulkan_context.GetDevice(),
-                                               &transient_pool_info, nullptr,
-                                               &transient_descriptor_pool);
-          result != VK_SUCCESS) {
-        return std::unexpected(VkInitializationError{
-            .message = "Failed to create transient descriptor pool: " +
-                       std::to_string(result) + ": " +
-                       string_VkResult(result)});
-      }
-      frame_contexts[i]->SetTransientDescriptorPool(transient_descriptor_pool);
+  VkDescriptorPoolCreateInfo transient_pool_info = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+      .pNext = nullptr,
+      .flags = 0,
+      .maxSets = 1,
+      .poolSizeCount = static_cast<u32>(transient_pool_sizes.size()),
+      .pPoolSizes = transient_pool_sizes.data(),
+  };
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    VkDescriptorPool transient_descriptor_pool = VK_NULL_HANDLE;
+    if (auto result = vkCreateDescriptorPool(vulkan_context.GetDevice(),
+                                             &transient_pool_info, nullptr,
+                                             &transient_descriptor_pool);
+        result != VK_SUCCESS) {
+      return std::unexpected(VkInitializationError{
+          .message = "Failed to create transient descriptor pool: " +
+                     std::to_string(result) + ": " + string_VkResult(result)});
     }
+    frame_contexts[i]->SetTransientDescriptorPool(transient_descriptor_pool);
   }
 
   return {};
@@ -699,6 +691,18 @@ LuminaRenderer::~LuminaRenderer() noexcept {
                         nullptr);
     }
   });
+
+  // Destroy shader interfaces before the global DSL they reference.
+  shader_interfaces.clear();
+
+  if (global_pipeline_layout != VK_NULL_HANDLE) {
+    vkDestroyPipelineLayout(vulkan_context.GetDevice(), global_pipeline_layout,
+                            nullptr);
+  }
+  if (global_descriptor_set_layout != VK_NULL_HANDLE) {
+    vkDestroyDescriptorSetLayout(vulkan_context.GetDevice(),
+                                 global_descriptor_set_layout, nullptr);
+  }
 }
 
 auto LuminaRenderer::AcquireFrameContextForUpdate() -> void {
@@ -872,28 +876,17 @@ auto LuminaRenderer::Initialize() -> void {
   }
   command_pool = command_pool_result.value();
 
-  auto shader_interface_result = ShaderInterface::Create(
-      vulkan_context.GetDevice(), lumina::shaders::standard_lit::vert::kLayout,
-      lumina::shaders::standard_lit::frag::kLayout);
-  if (!shader_interface_result) {
-    LOG_CRITICAL("Failed to create shader interface: {}",
-                 shader_interface_result.error().message);
+  auto global_dsl_result = CreateGlobalDescriptorSetLayout(this);
+  if (!global_dsl_result) {
+    LOG_CRITICAL("Failed to create global descriptor set layout: {}",
+                 global_dsl_result.error().message);
     LUMINA_TERMINATE();
   }
-  shader_interface = std::move(shader_interface_result.value());
 
-  MaterialTemplateDescription mat_desc = {
-      .shader_interface = &shader_interface,
-      .vertex_layout = lumina::shaders::standard_lit::vert::kLayout,
-      .fragment_layout = lumina::shaders::standard_lit::frag::kLayout,
-      .vertex_shader_bin_path = "shaders/spv/shader.vert.spv",
-      .fragment_shader_bin_path = "shaders/spv/shader.frag.spv",
-      .max_instances = 2,
-  };
-  auto mat_template_handle = CreateMaterialTemplate(mat_desc);
+  BuildStaticMaterialTemplates(this);
 
   default_material_instance_handle =
-      CreateMaterialInstance(mat_template_handle);
+      CreateMaterialInstance(default_material_template_handle);
 
   auto depth_result = CreateDepthResources(
       vulkan_context, command_pool, depth_image, depth_image_view,
@@ -1152,8 +1145,9 @@ auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
   vkResetDescriptorPool(device, pool, 0);
 
   // Allocate a single descriptor set for set 0 (per-frame globals).
-  auto *dsl = shader_interface.GetDescriptorSetLayout(0);
-  ASSERT(dsl != VK_NULL_HANDLE, "Set 0 descriptor set layout not found");
+  ASSERT(global_descriptor_set_layout != VK_NULL_HANDLE,
+         "Global descriptor set layout not created");
+  auto dsl = global_descriptor_set_layout;
 
   VkDescriptorSetAllocateInfo alloc_info = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -1276,27 +1270,28 @@ auto LuminaRenderer::AccumulateDescriptorBudget(const ShaderLayout &vert_layout,
     merged[{b.set, b.binding}] = b.type;
   }
 
-  // Accumulate into budgets from the merged set.
+  // Accumulate into persistent budget (set 0 is handled globally).
   std::set<u32> persistent_sets;
   for (const auto &[key, type] : merged) {
     auto [set, binding] = key;
     if (set == 0) {
-      transient_descriptor_pool_budget[type] += 1;
-    } else {
-      persistent_descriptor_pool_budget[type] +=
-          max_instances * MAX_FRAMES_IN_FLIGHT;
-      persistent_sets.insert(set);
+      continue;
     }
+    persistent_descriptor_pool_budget[type] +=
+        max_instances * MAX_FRAMES_IN_FLIGHT;
+    persistent_sets.insert(set);
   }
 
-  max_transient_descriptor_sets += 1;
   max_persistent_descriptor_sets +=
       max_instances * persistent_sets.size() * MAX_FRAMES_IN_FLIGHT;
 }
 
 auto LuminaRenderer::CreateMaterialTemplate(
     const MaterialTemplateDescription &desc) -> MaterialTemplateHandle {
-  auto material_template_result = MaterialTemplate::Create(desc);
+  auto &shader_interface = shader_interfaces[desc.shader_interface_index];
+  auto material_template_result =
+      MaterialTemplate::Create(desc.vertex_shader_bin_path,
+                               desc.fragment_shader_bin_path, shader_interface);
   if (!material_template_result) {
     LOG_CRITICAL("Failed to create material template: {}",
                  material_template_result.error().message);
@@ -1497,7 +1492,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       .pDepthStencilState = &depth_stencil_state_create_info,
       .pColorBlendState = &color_blend_state_create_info,
       .pDynamicState = &dynamic_state_create_info,
-      .layout = shader_interface.GetPipelineLayout(),
+      .layout = material_template.GetShaderInterface()->GetPipelineLayout(),
       .renderPass = VK_NULL_HANDLE,
       .subpass = 0,
       .basePipelineHandle = VK_NULL_HANDLE,
@@ -1647,10 +1642,9 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   };
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-  vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          shader_interface.GetPipelineLayout(), 0, 1,
-                          &frame_context.GetTransientDescriptorSet(), 0,
-                          nullptr);
+  vkCmdBindDescriptorSets(
+      command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, global_pipeline_layout,
+      0, 1, &frame_context.GetTransientDescriptorSet(), 0, nullptr);
 
   for (const auto &draw_mesh_info : frame_context.render_draw_list) {
     auto handle = draw_mesh_info.render_mesh_handle;
@@ -1672,9 +1666,15 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
       continue;
     }
     auto &material_instance = material_instance_opt.value();
+    auto material_template_opt =
+        material_template_manager.Get(material_instance.GetTemplateHandle());
+    if (!material_template_opt.has_value()) {
+      continue;
+    }
+    auto &material_template = material_template_opt.value();
     vkCmdBindDescriptorSets(
         command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        shader_interface.GetPipelineLayout(), 1, 1,
+        material_template.GetShaderInterface()->GetPipelineLayout(), 1, 1,
         &material_instance.GetDescriptorSet(current_frame_index), 0, nullptr);
 
     VkDeviceSize offsets[] = {0};
@@ -1682,9 +1682,10 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
                            &render_mesh.vertex_streams[0].buffer, offsets);
     vkCmdBindIndexBuffer(command_buffer, render_mesh.index_buffer, 0,
                          VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(command_buffer, shader_interface.GetPipelineLayout(),
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
-                       &model);
+    vkCmdPushConstants(
+        command_buffer,
+        material_template.GetShaderInterface()->GetPipelineLayout(),
+        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4), &model);
     vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh.index_count),
                      1, 0, 0, 0);
   }

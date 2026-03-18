@@ -11,7 +11,7 @@ struct MaterialTemplateCreateError {
 };
 
 struct MaterialTemplateDescription {
-  ShaderInterface *shader_interface;
+  size_t shader_interface_index;
   ShaderLayout vertex_layout;
   ShaderLayout fragment_layout;
   std::string vertex_shader_bin_path;
@@ -21,7 +21,9 @@ struct MaterialTemplateDescription {
 
 class MaterialTemplate {
 public: // static methods
-  static auto Create(const MaterialTemplateDescription &description)
+  static auto Create(const std::string &vertex_shader_bin_path,
+                     const std::string &fragment_shader_bin_path,
+                     ShaderInterface &shader_interface)
       -> std::expected<MaterialTemplate, MaterialTemplateCreateError>;
 
 public: // instance methods

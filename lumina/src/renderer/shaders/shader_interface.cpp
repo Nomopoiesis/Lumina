@@ -102,9 +102,11 @@ ShaderInterface::~ShaderInterface() noexcept {
     if (pipeline_layout != VK_NULL_HANDLE) {
       vkDestroyPipelineLayout(m_device, pipeline_layout, nullptr);
     }
-    for (const auto &descriptor_set_layout : descriptor_set_layouts) {
-      if (descriptor_set_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, descriptor_set_layout, nullptr);
+    for (size_t i = externally_owned_set_count;
+         i < descriptor_set_layouts.size(); ++i) {
+      if (descriptor_set_layouts[i] != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, descriptor_set_layouts[i],
+                                     nullptr);
       }
     }
     m_device = VK_NULL_HANDLE;
@@ -112,13 +114,16 @@ ShaderInterface::~ShaderInterface() noexcept {
 }
 
 ShaderInterface::ShaderInterface(ShaderInterface &&other) noexcept
-    : m_device(other.m_device),
+    : m_device(other.m_device), name(std::move(other.name)),
       descriptor_set_layouts(std::move(other.descriptor_set_layouts)),
+      externally_owned_set_count(other.externally_owned_set_count),
       set_indices(std::move(other.set_indices)),
       vertex_input_layout(other.vertex_input_layout),
       pipeline_layout(other.pipeline_layout) {
   other.m_device = VK_NULL_HANDLE;
+  other.name.clear();
   other.descriptor_set_layouts.clear();
+  other.externally_owned_set_count = 0;
   other.set_indices.clear();
   other.vertex_input_layout = {};
   other.pipeline_layout = VK_NULL_HANDLE;
@@ -128,12 +133,16 @@ auto ShaderInterface::operator=(ShaderInterface &&other) noexcept
     -> ShaderInterface & {
   if (this != &other) {
     m_device = other.m_device;
+    name = std::move(other.name);
     descriptor_set_layouts = std::move(other.descriptor_set_layouts);
+    externally_owned_set_count = other.externally_owned_set_count;
     set_indices = std::move(other.set_indices);
     vertex_input_layout = other.vertex_input_layout;
     pipeline_layout = other.pipeline_layout;
     other.m_device = VK_NULL_HANDLE;
+    other.name.clear();
     other.descriptor_set_layouts.clear();
+    other.externally_owned_set_count = 0;
     other.set_indices.clear();
     other.vertex_input_layout = {};
     other.pipeline_layout = VK_NULL_HANDLE;
@@ -141,10 +150,21 @@ auto ShaderInterface::operator=(ShaderInterface &&other) noexcept
   return *this;
 }
 auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
-                             const ShaderLayout &fragment_layout)
+                             const ShaderLayout &fragment_layout,
+                             const std::string &name,
+                             VkDescriptorSetLayout global_descriptor_set_layout,
+                             const ShaderLayout &global_layout)
     -> std::expected<ShaderInterface, ShaderInterfaceCreateError> {
   ShaderInterface shader_interface;
   shader_interface.m_device = device;
+  shader_interface.name = name;
+
+  // Slot the externally-owned global descriptor set layout at dense index 0.
+  shader_interface.set_indices.push_back(0); // set_indices[0] = dense index 0
+  shader_interface.descriptor_set_layouts.push_back(
+      global_descriptor_set_layout);
+  shader_interface.externally_owned_set_count = 1;
+
   std::map<std::pair<u32, u32>, BindingInfo> merged_binding_infos;
   for (u32 i = 0; i < vertex_layout.binding_count; ++i) {
     const auto &binding = vertex_layout.bindings[i];
@@ -180,6 +200,10 @@ auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
   }
 
   for (const auto &[set, binding_infos] : set_binding_infos) {
+    // Set 0 is the global descriptor set — already provided externally.
+    if (set == 0) {
+      continue;
+    }
     auto descriptor_set_layout_result =
         CreateDescriptorSetLayout(device, binding_infos);
     if (!descriptor_set_layout_result) {
@@ -195,29 +219,15 @@ auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
         descriptor_set_layout_result.value());
   }
 
-  // Create push constant ranges from reflected layout data
+  // Push constants are global — sourced from the global layout so that all
+  // pipeline layouts share the same push constant range.
   std::vector<VkPushConstantRange> push_constant_ranges;
-  if (vertex_layout.push_constant_size > 0) {
+  if (global_layout.push_constant_size > 0) {
     push_constant_ranges.push_back({
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = vertex_layout.push_constant_offset,
-        .size = vertex_layout.push_constant_size,
+        .offset = global_layout.push_constant_offset,
+        .size = global_layout.push_constant_size,
     });
-  }
-  if (fragment_layout.push_constant_size > 0) {
-    // If same range as vert, merge stage flags rather than emitting two ranges
-    if (!push_constant_ranges.empty() &&
-        push_constant_ranges[0].offset ==
-            fragment_layout.push_constant_offset &&
-        push_constant_ranges[0].size == fragment_layout.push_constant_size) {
-      push_constant_ranges[0].stageFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
-    } else {
-      push_constant_ranges.push_back({
-          .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-          .offset = fragment_layout.push_constant_offset,
-          .size = fragment_layout.push_constant_size,
-      });
-    }
   }
 
   // Build a set-indexed layout vector for vkCreatePipelineLayout.
@@ -226,11 +236,15 @@ auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
   // VK_NULL_HANDLE is not a valid pSetLayouts entry.
   std::vector<VkDescriptorSetLayout> ordered_layouts;
   if (!shader_interface.set_indices.empty()) {
-    const u32 max_set = shader_interface.set_indices.back(); // map was sorted
+    const u32 max_set =
+        static_cast<u32>(shader_interface.set_indices.size()) - 1;
     ordered_layouts.resize(max_set + 1, VK_NULL_HANDLE);
-    for (u32 i = 0; i < shader_interface.set_indices.size(); ++i) {
-      ordered_layouts[shader_interface.set_indices[i]] =
-          shader_interface.descriptor_set_layouts[i];
+    for (u32 s = 0; s <= max_set; ++s) {
+      if (shader_interface.set_indices[s] != UINT32_MAX) {
+        ordered_layouts[s] =
+            shader_interface
+                .descriptor_set_layouts[shader_interface.set_indices[s]];
+      }
     }
 
     for (u32 s = 0; s <= max_set; ++s) {

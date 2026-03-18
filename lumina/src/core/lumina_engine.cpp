@@ -1,7 +1,6 @@
 #include "lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
-#include "standard_lit.vert.gen.hpp"
 
 #include "basic_geometry.hpp"
 #include "components/camera.hpp"

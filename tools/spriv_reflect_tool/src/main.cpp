@@ -173,6 +173,8 @@ static auto StageEnumString(const std::string &stage) -> std::string {
     return "lumina::renderer::ShaderStage::Vertex";
   if (stage == "frag")
     return "lumina::renderer::ShaderStage::Fragment";
+  if (stage == "global")
+    return "lumina::renderer::ShaderStage::Global";
   ASSERT(false, "Unknown shader stage");
   return "Unknown";
 }
@@ -458,8 +460,8 @@ auto main(int argc, char **argv) -> int {
             : "{}";
     const std::string layout_init =
         "{ .stage = " + StageEnumString(stage) +
-        ", .bindings = " + bindings_ptr +
         ", .binding_count = " + std::to_string(total_binding_count) +
+        ", .bindings = " + bindings_ptr +
         ", .push_constant_size = " + push_constant_size_str +
         ", .push_constant_offset = " + std::to_string(push_constant_offset) +
         ", .vertex_input_layout = " + vertex_input_layout_str + " }";

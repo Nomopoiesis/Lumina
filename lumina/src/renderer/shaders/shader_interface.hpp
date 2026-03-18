@@ -19,7 +19,10 @@ struct ShaderInterfaceCreateError {
 class ShaderInterface {
 public: // static methods
   static auto Create(VkDevice device, const ShaderLayout &vertex_layout,
-                     const ShaderLayout &fragment_layout)
+                     const ShaderLayout &fragment_layout,
+                     const std::string &name,
+                     VkDescriptorSetLayout global_descriptor_set_layout,
+                     const ShaderLayout &global_layout)
       -> std::expected<ShaderInterface, ShaderInterfaceCreateError>;
 
 public: // instance methods
@@ -48,11 +51,15 @@ public: // instance methods
     return vertex_input_layout;
   }
 
+  [[nodiscard]] auto GetName() const -> const std::string & { return name; }
+
 private: // instance members
+  std::string name;
   VkDevice m_device = VK_NULL_HANDLE;
   std::vector<u32>
       set_indices; // corresponds to the set index in the descriptor set layouts
   std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
+  u32 externally_owned_set_count = 0;
   VertexInputLayout vertex_input_layout;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 };
