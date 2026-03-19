@@ -2,10 +2,10 @@
 
 #include "interface.global.glsl"
 
-#include "../interfaces/standard_lit.vert.glsl"
+#include "../interfaces/simple_model_input.vert.glsl"
 
 void main() {
   gl_Position = vec4(inPosition, 1.0) * pc.model * ubo.view * ubo.proj;
-  fragColor = inColor;
+  fragNormal = inNormal;
   fragTexCoord = inTexCoord;
 }

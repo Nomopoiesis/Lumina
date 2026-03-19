@@ -219,8 +219,16 @@ private:
   VkDescriptorSetLayout global_descriptor_set_layout = VK_NULL_HANDLE;
   VkPipelineLayout global_pipeline_layout = VK_NULL_HANDLE;
 
+  VkBuffer default_material_ubo_buffer = VK_NULL_HANDLE;
+  VkDeviceMemory default_material_ubo_memory = VK_NULL_HANDLE;
+  void *default_material_ubo_mapped = nullptr;
+
   friend auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
       -> std::expected<void, VkInitializationError>;
+  friend auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void;
+  friend auto WriteTransientDescriptors(LuminaRenderer *renderer,
+                                        FrameContext &frame_context,
+                                        VkDescriptorSet descriptor_set) -> void;
 };
 
 } // namespace lumina::renderer

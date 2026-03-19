@@ -15,11 +15,11 @@ public:
         {0.5, 0.5, 0.0},
         {-0.5, 0.5, 0.0},
     };
-    std::vector<math::Vec3> colors = {
-        {1.0, 0.0, 0.0},
-        {0.0, 1.0, 0.0},
-        {0.0, 0.0, 1.0},
-        {1.0, 1.0, 1.0},
+    std::vector<math::Vec3> normals = {
+        {0.0, 0.0, -1.0},
+        {0.0, 0.0, -1.0},
+        {0.0, 0.0, -1.0},
+        {0.0, 0.0, -1.0},
     };
     std::vector<math::Vec2> tex_coords = {
         {0.0, 1.0},
@@ -36,10 +36,11 @@ public:
             reinterpret_cast<u8 *>(positions.data()),
             reinterpret_cast<u8 *>(positions.data() + positions.size())));
     mesh.vertex_attributes.emplace_back(
-        VertexAttribute{.type = VertexAttributeType::Color,
+        VertexAttribute{.type = VertexAttributeType::Normal,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(reinterpret_cast<u8 *>(colors.data()),
-                        reinterpret_cast<u8 *>(colors.data() + colors.size())));
+        std::vector<u8>(
+            reinterpret_cast<u8 *>(normals.data()),
+            reinterpret_cast<u8 *>(normals.data() + normals.size())));
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::TexCoord,
                         .element_type = ElementType::Vec2},
@@ -58,53 +59,77 @@ public:
     // viewed from outside each face.
     std::vector<math::Vec3> positions = {
         // Front (z = +0.5)
-        {-0.5, -0.5, +0.5}, {+0.5, -0.5, +0.5},
-        {+0.5, +0.5, +0.5}, {-0.5, +0.5, +0.5},
+        {-0.5, -0.5, +0.5},
+        {+0.5, -0.5, +0.5},
+        {+0.5, +0.5, +0.5},
+        {-0.5, +0.5, +0.5},
         // Back (z = -0.5)
-        {+0.5, -0.5, -0.5}, {-0.5, -0.5, -0.5},
-        {-0.5, +0.5, -0.5}, {+0.5, +0.5, -0.5},
+        {+0.5, -0.5, -0.5},
+        {-0.5, -0.5, -0.5},
+        {-0.5, +0.5, -0.5},
+        {+0.5, +0.5, -0.5},
         // Right (x = +0.5)
-        {+0.5, -0.5, +0.5}, {+0.5, -0.5, -0.5},
-        {+0.5, +0.5, -0.5}, {+0.5, +0.5, +0.5},
+        {+0.5, -0.5, +0.5},
+        {+0.5, -0.5, -0.5},
+        {+0.5, +0.5, -0.5},
+        {+0.5, +0.5, +0.5},
         // Left (x = -0.5)
-        {-0.5, -0.5, -0.5}, {-0.5, -0.5, +0.5},
-        {-0.5, +0.5, +0.5}, {-0.5, +0.5, -0.5},
+        {-0.5, -0.5, -0.5},
+        {-0.5, -0.5, +0.5},
+        {-0.5, +0.5, +0.5},
+        {-0.5, +0.5, -0.5},
         // Top (y = +0.5)
-        {-0.5, +0.5, +0.5}, {+0.5, +0.5, +0.5},
-        {+0.5, +0.5, -0.5}, {-0.5, +0.5, -0.5},
+        {-0.5, +0.5, +0.5},
+        {+0.5, +0.5, +0.5},
+        {+0.5, +0.5, -0.5},
+        {-0.5, +0.5, -0.5},
         // Bottom (y = -0.5)
-        {-0.5, -0.5, -0.5}, {+0.5, -0.5, -0.5},
-        {+0.5, -0.5, +0.5}, {-0.5, -0.5, +0.5},
+        {-0.5, -0.5, -0.5},
+        {+0.5, -0.5, -0.5},
+        {+0.5, -0.5, +0.5},
+        {-0.5, -0.5, +0.5},
     };
 
-    std::vector<math::Vec3> colors = {
+    std::vector<math::Vec3> normals = {
         // Front: red
-        {1.0, 0.0, 0.0}, {1.0, 0.0, 0.0},
-        {1.0, 0.0, 0.0}, {1.0, 0.0, 0.0},
+        {0.0, 0.0, 1.0},
+        {0.0, 0.0, 1.0},
+        {0.0, 0.0, 1.0},
+        {0.0, 0.0, 1.0},
         // Back: cyan
-        {0.0, 1.0, 1.0}, {0.0, 1.0, 1.0},
-        {0.0, 1.0, 1.0}, {0.0, 1.0, 1.0},
+        {0.0, 0.0, -1.0},
+        {0.0, 0.0, -1.0},
+        {0.0, 0.0, -1.0},
+        {0.0, 0.0, -1.0},
         // Right: green
-        {0.0, 1.0, 0.0}, {0.0, 1.0, 0.0},
-        {0.0, 1.0, 0.0}, {0.0, 1.0, 0.0},
+        {1.0, 0.0, 0.0},
+        {1.0, 0.0, 0.0},
+        {1.0, 0.0, 0.0},
+        {1.0, 0.0, 0.0},
         // Left: magenta
-        {1.0, 0.0, 1.0}, {1.0, 0.0, 1.0},
-        {1.0, 0.0, 1.0}, {1.0, 0.0, 1.0},
+        {-1.0, 0.0, 0.0},
+        {-1.0, 0.0, 0.0},
+        {-1.0, 0.0, 0.0},
+        {-1.0, 0.0, 0.0},
         // Top: blue
-        {0.0, 0.0, 1.0}, {0.0, 0.0, 1.0},
-        {0.0, 0.0, 1.0}, {0.0, 0.0, 1.0},
+        {0.0, 1.0, 0.0},
+        {0.0, 1.0, 0.0},
+        {0.0, 1.0, 0.0},
+        {0.0, 1.0, 0.0},
         // Bottom: yellow
-        {1.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
-        {1.0, 1.0, 0.0}, {1.0, 1.0, 0.0},
+        {0.0, -1.0, 0.0},
+        {0.0, -1.0, 0.0},
+        {0.0, -1.0, 0.0},
+        {0.0, -1.0, 0.0},
     };
 
     std::vector<math::Vec2> tex_coords = {
-        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0},  // Front
-        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0},  // Back
-        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0},  // Right
-        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0},  // Left
-        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0},  // Top
-        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0},  // Bottom
+        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, // Front
+        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, // Back
+        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, // Right
+        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, // Left
+        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, // Top
+        {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}, // Bottom
     };
 
     // 6 faces × 6 indices each = 36 indices
@@ -128,10 +153,11 @@ public:
             reinterpret_cast<u8 *>(positions.data()),
             reinterpret_cast<u8 *>(positions.data() + positions.size())));
     mesh.vertex_attributes.emplace_back(
-        VertexAttribute{.type = VertexAttributeType::Color,
+        VertexAttribute{.type = VertexAttributeType::Normal,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(reinterpret_cast<u8 *>(colors.data()),
-                        reinterpret_cast<u8 *>(colors.data() + colors.size())));
+        std::vector<u8>(
+            reinterpret_cast<u8 *>(normals.data()),
+            reinterpret_cast<u8 *>(normals.data() + normals.size())));
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::TexCoord,
                         .element_type = ElementType::Vec2},

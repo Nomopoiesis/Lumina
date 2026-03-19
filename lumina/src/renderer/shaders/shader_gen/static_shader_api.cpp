@@ -1,8 +1,8 @@
 #include "static_shader_api.hpp"
 
 #include "headers/interface.global.hpp"
-#include "headers/standard_lit.frag.hpp"
-#include "headers/standard_lit.vert.hpp"
+#include "headers/simple_input_basic_mat.frag.hpp"
+#include "headers/simple_model_input.vert.hpp"
 
 #include "shaders/shader_vk_helpers.hpp"
 
@@ -11,12 +11,14 @@
 namespace lumina::renderer {
 
 auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
+  namespace vert = lumina::shaders::simple_model_input::vert;
+  namespace frag = lumina::shaders::simple_input_basic_mat::frag;
+  namespace global = lumina::shaders::interface::global;
+
   auto shader_interface_result = ShaderInterface::Create(
-      renderer->GetVulkanContext().GetDevice(),
-      lumina::shaders::standard_lit::vert::kLayout,
-      lumina::shaders::standard_lit::frag::kLayout, "standard_lit",
-      renderer->GetGlobalDescriptorSetLayout(),
-      lumina::shaders::interface::global::kLayout);
+      renderer->GetVulkanContext().GetDevice(), vert::kLayout, frag::kLayout,
+      "standard_lit", renderer->GetGlobalDescriptorSetLayout(),
+      global::kLayout);
   if (!shader_interface_result) {
     LOG_CRITICAL("Failed to create shader interface: {}",
                  shader_interface_result.error().message);
@@ -28,8 +30,8 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
 
   MaterialTemplateDescription mat_desc = {
       .shader_interface_index = shader_interface_index,
-      .vertex_layout = lumina::shaders::standard_lit::vert::kLayout,
-      .fragment_layout = lumina::shaders::standard_lit::frag::kLayout,
+      .vertex_layout = vert::kLayout,
+      .fragment_layout = frag::kLayout,
       .vertex_shader_bin_path = "shaders/spv/shader.vert.spv",
       .fragment_shader_bin_path = "shaders/spv/shader.frag.spv",
       .max_instances = 2,
@@ -119,6 +121,46 @@ auto GetGlobalDescriptorPoolSizes(std::vector<VkDescriptorPoolSize> &pool_sizes)
         .descriptorCount = kBinding.array_count,
     });
   }
+}
+
+auto GetDefaultMaterialUBOSize() -> VkDeviceSize {
+  return sizeof(shaders::simple_input_basic_mat::frag::MaterialUniforms);
+}
+
+auto InitDefaultMaterialUBO(void *mapped_data) -> void {
+  using MU = shaders::simple_input_basic_mat::frag::MaterialUniforms;
+  auto *mu = static_cast<MU *>(mapped_data);
+  mu->ambient_intensity = 0.0F;
+  mu->ambient_color = {1.0F, 1.0F, 1.0F};
+  mu->diffuse_color = {1.0F, 0.0F, 0.0F};
+}
+
+auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void {
+  namespace mat = shaders::simple_input_basic_mat::frag;
+
+  auto *instance = renderer->material_instance_manager.GetRef(
+      renderer->default_material_instance_handle);
+  ASSERT(instance != nullptr, "Default material instance not found");
+
+  mat::BindingData bindings{
+      .texSampler_sampler = renderer->texture_sampler,
+      .texSampler_imageView = renderer->texture_image_view,
+      .material_uniforms_buffer = renderer->default_material_ubo_buffer,
+  };
+
+  auto *device = renderer->vulkan_context.GetDevice();
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    mat::WriteDescriptors(device, instance->GetDescriptorSet(i), bindings);
+  }
+}
+
+auto WriteTransientDescriptors(LuminaRenderer *renderer,
+                               FrameContext &frame_context,
+                               VkDescriptorSet descriptor_set) -> void {
+  namespace global = shaders::interface::global;
+  global::WriteDescriptors(
+      renderer->vulkan_context.GetDevice(), descriptor_set,
+      {.ubo_buffer = frame_context.GetUniformBuffer().buffer});
 }
 
 } // namespace lumina::renderer

@@ -71,7 +71,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
            std::span<const VertexAttribute>(
                {VertexAttribute{.type = VertexAttributeType::Position,
                                 .element_type = ElementType::Vec3},
-                VertexAttribute{.type = VertexAttributeType::Color,
+                VertexAttribute{.type = VertexAttributeType::Normal,
                                 .element_type = ElementType::Vec3},
                 VertexAttribute{.type = VertexAttributeType::TexCoord,
                                 .element_type = ElementType::Vec2}})),

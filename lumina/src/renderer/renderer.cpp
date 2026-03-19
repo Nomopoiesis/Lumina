@@ -675,6 +675,18 @@ LuminaRenderer::~LuminaRenderer() noexcept {
     vkFreeMemory(vulkan_context.GetDevice(), texture_image_memory, nullptr);
   }
 
+  if (default_material_ubo_mapped != nullptr) {
+    vkUnmapMemory(vulkan_context.GetDevice(), default_material_ubo_memory);
+  }
+  if (default_material_ubo_buffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(vulkan_context.GetDevice(), default_material_ubo_buffer,
+                    nullptr);
+  }
+  if (default_material_ubo_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), default_material_ubo_memory,
+                 nullptr);
+  }
+
   if (persistent_descriptor_pool != VK_NULL_HANDLE) {
     vkDestroyDescriptorPool(vulkan_context.GetDevice(),
                             persistent_descriptor_pool, nullptr);
@@ -928,42 +940,22 @@ auto LuminaRenderer::Initialize() -> void {
                  desc_pool_result.error().message);
     LUMINA_TERMINATE();
   }
-  std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> uniform_buffers{};
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    uniform_buffers[i] = frame_contexts[i]->GetUniformBuffer().buffer;
+  // Create the default material's uniform buffer.
+  {
+    VkDeviceSize mat_ubo_size = GetDefaultMaterialUBOSize();
+    CreateBuffer(vulkan_context, mat_ubo_size,
+                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE,
+                 0, nullptr,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 default_material_ubo_memory, default_material_ubo_buffer);
+    vkMapMemory(vulkan_context.GetDevice(), default_material_ubo_memory, 0,
+                mat_ubo_size, 0, &default_material_ubo_mapped);
+    InitDefaultMaterialUBO(default_material_ubo_mapped);
   }
 
   AllocatePersistentDescriptorSets(default_material_instance_handle);
-
-  // Write texture binding into the default material's persistent descriptor
-  // sets (set 1, binding 0 = CombinedImageSampler).
-  {
-    auto *instance =
-        material_instance_manager.GetRef(default_material_instance_handle);
-    ASSERT(instance != nullptr, "Default material instance not found");
-
-    VkDescriptorImageInfo image_info = {
-        .sampler = texture_sampler,
-        .imageView = texture_image_view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    };
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-      VkWriteDescriptorSet write = {
-          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-          .pNext = nullptr,
-          .dstSet = instance->GetDescriptorSet(i),
-          .dstBinding = 0,
-          .dstArrayElement = 0,
-          .descriptorCount = 1,
-          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .pImageInfo = &image_info,
-          .pBufferInfo = nullptr,
-          .pTexelBufferView = nullptr,
-      };
-      vkUpdateDescriptorSets(vulkan_context.GetDevice(), 1, &write, 0, nullptr);
-    }
-  }
+  WriteDefaultMaterialDescriptors(this);
 
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
 } // namespace lumina::renderer
@@ -1161,27 +1153,7 @@ auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
   auto result = vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set);
   ASSERT(result == VK_SUCCESS, "Failed to allocate transient descriptor set");
 
-  // Write the per-frame UBO into binding 0.
-  VkDescriptorBufferInfo buffer_info = {
-      .buffer = frame_context.GetUniformBuffer().buffer,
-      .offset = 0,
-      .range = sizeof(core::UniformBufferObject),
-  };
-
-  VkWriteDescriptorSet write = {
-      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-      .pNext = nullptr,
-      .dstSet = descriptor_set,
-      .dstBinding = 0,
-      .dstArrayElement = 0,
-      .descriptorCount = 1,
-      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      .pImageInfo = nullptr,
-      .pBufferInfo = &buffer_info,
-      .pTexelBufferView = nullptr,
-  };
-
-  vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+  WriteTransientDescriptors(this, frame_context, descriptor_set);
 
   frame_context.SetTransientDescriptorSet(descriptor_set);
 }

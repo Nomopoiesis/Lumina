@@ -4,6 +4,7 @@
 #include "math/matrix.hpp"
 #include "math/vector.hpp"
 #include "renderer/shaders/shader_layout.hpp"
+#include <vulkan/vulkan.h>
 
 namespace lumina::shaders::interface::global {
 struct UniformBufferObject {
@@ -30,4 +31,30 @@ static constexpr lumina::renderer::ShaderLayout kLayout = {
     .push_constant_size = sizeof(PushConstants),
     .push_constant_offset = 0,
     .vertex_input_layout = {}};
+
+struct BindingData {
+  VkBuffer ubo_buffer;
+  VkDeviceSize ubo_offset = 0;
+  VkDeviceSize ubo_range = sizeof(UniformBufferObject);
+}; // struct BindingData
+
+inline void WriteDescriptors(VkDevice device, VkDescriptorSet set,
+                             const BindingData &data) {
+  VkDescriptorBufferInfo buffer_info_0{
+      .buffer = data.ubo_buffer,
+      .offset = data.ubo_offset,
+      .range = data.ubo_range,
+  };
+  VkWriteDescriptorSet writes[] = {
+      {
+          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .dstSet = set,
+          .dstBinding = 0,
+          .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          .pBufferInfo = &buffer_info_0,
+      },
+  };
+  vkUpdateDescriptorSets(device, 1, writes, 0, nullptr);
+}
 } // namespace lumina::shaders::interface::global

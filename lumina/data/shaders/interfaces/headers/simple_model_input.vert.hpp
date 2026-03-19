@@ -5,13 +5,13 @@
 #include "math/vector.hpp"
 #include "renderer/shaders/shader_layout.hpp"
 
-namespace lumina::shaders::standard_lit::vert {
+namespace lumina::shaders::simple_model_input::vert {
 static constexpr lumina::renderer::VertexInputInfo kVertexInputs[] = {
     {.location = 0,
      .attribute_type = lumina::core::VertexAttributeType::Position,
      .element_type = lumina::core::ElementType::Vec3},
     {.location = 1,
-     .attribute_type = lumina::core::VertexAttributeType::Color,
+     .attribute_type = lumina::core::VertexAttributeType::Normal,
      .element_type = lumina::core::ElementType::Vec3},
     {.location = 2,
      .attribute_type = lumina::core::VertexAttributeType::TexCoord,
@@ -24,4 +24,4 @@ static constexpr lumina::renderer::ShaderLayout kLayout = {
     .push_constant_size = 0,
     .push_constant_offset = 0,
     .vertex_input_layout = {.input_count = 3, .inputs = kVertexInputs}};
-} // namespace lumina::shaders::standard_lit::vert
+} // namespace lumina::shaders::simple_model_input::vert
