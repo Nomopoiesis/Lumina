@@ -5,9 +5,11 @@
 #include "common/logger/logger.hpp"
 #include "platform/common/platform_services.hpp"
 #include "win_window.hpp"
+#include <Shlwapi.h>
 #include <conio.h>
 #include <cstddef>
 #include <wchar.h>
+
 
 namespace lumina::platform::windows {
 
@@ -33,6 +35,16 @@ auto WinCreateFile(const char *path) -> void * {
   SetFilePointer(handle, 0, nullptr, FILE_END);
 
   return static_cast<void *>(handle);
+}
+
+auto WinCreateDirectory(const char *path) -> bool {
+  if (path == nullptr) {
+    return false;
+  }
+  if (PathFileExistsA(path) == TRUE) {
+    return true;
+  }
+  return CreateDirectoryA(path, nullptr) != FALSE;
 }
 
 auto WinOpenFile(const char *path) -> void * {
@@ -243,11 +255,11 @@ auto WinSetCursorTrapped(bool trapped) -> void {
 
 auto InitPlatformServices() -> void {
   lumina::platform::common::PlatformServices::Initialize(
-      WinCreateFile, WinOpenFile, WinGetFileSize, WinWriteFile, WinReadFile,
-      WinCloseFile, WinDeleteFile, WinCreateConsole, WinWriteConsole,
-      WinWaitConsoleKeypress, WinSetThreadName, WinPinThread, WinCreateFiber,
-      WinConvertThreadToFiber, WinSwitchToFiber, WinSetCursorPosition,
-      WinSetCursorTrapped);
+      WinCreateFile, WinCreateDirectory, WinOpenFile, WinGetFileSize,
+      WinWriteFile, WinReadFile, WinCloseFile, WinDeleteFile, WinCreateConsole,
+      WinWriteConsole, WinWaitConsoleKeypress, WinSetThreadName, WinPinThread,
+      WinCreateFiber, WinConvertThreadToFiber, WinSwitchToFiber,
+      WinSetCursorPosition, WinSetCursorTrapped);
 }
 
 } // namespace lumina::platform::windows

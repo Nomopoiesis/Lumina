@@ -20,11 +20,12 @@ public:
   const PathResolver shaders;
   const PathResolver textures;
   const PathResolver models;
+  const PathResolver model_cache;
 
 private:
   explicit PathRegistry(const std::filesystem::path &root)
       : shaders(root / "shaders"), textures(root / "textures"),
-        models(root / "models") {}
+        models(root / "models"), model_cache(root / "model_cache") {}
 
   static PathRegistry *instance_;
 };

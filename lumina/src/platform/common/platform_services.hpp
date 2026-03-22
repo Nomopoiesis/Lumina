@@ -34,6 +34,7 @@ public:
   // Must be called before using the singleton
   static auto Initialize(
       void *(*create_file)(const char *path),
+      bool (*create_directory)(const char *path),
       void *(*open_file)(const char *path),
       std::size_t (*get_file_size)(void *handle),
       bool (*write_file)(void *handle, const void *data, std::size_t size),
@@ -53,6 +54,7 @@ public:
       void (*set_cursor_trapped)(bool trapped)) -> void {
     auto &instance = GetStaticInstance();
     instance.LuminaCreateFile = create_file;
+    instance.LuminaCreateDirectory = create_directory;
     instance.LuminaOpenFile = open_file;
     instance.LuminaGetFileSize = get_file_size;
     instance.LuminaWriteFile = write_file;
@@ -76,6 +78,11 @@ public:
   // Creates/opens a file at the given path and returns a platform-specific
   // handle Returns nullptr on failure
   void *(*LuminaCreateFile)(const char *path) = nullptr;
+
+  // Creates a directory at the given path
+  // Returns true on success (also when the directory already exists), false on
+  // failure
+  bool (*LuminaCreateDirectory)(const char *path) = nullptr;
 
   // Opens a file at the given path and returns a platform-specific handle
   // Returns nullptr on failure
