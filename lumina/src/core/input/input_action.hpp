@@ -11,12 +11,22 @@
 namespace lumina::core {
 
 struct ActionID {
+  static constexpr auto HashString(std::string_view name) noexcept -> u64 {
+    // 64-bit FNV-1a for stable compile-time and runtime IDs.
+    u64 hash = 14695981039346656037ULL;
+    for (const char ch : name) {
+      hash ^= static_cast<unsigned char>(ch);
+      hash *= 1099511628211ULL;
+    }
+    return hash;
+  }
+
   u64 id;
   consteval ActionID(const char *name) noexcept
-      : id(std::hash<std::string_view>{}(name)) {}
+      : id(HashString(name)) {}
 
   explicit constexpr ActionID(std::string_view name) noexcept
-      : id(std::hash<std::string_view>{}(name)) {}
+      : id(HashString(name)) {}
 
   auto operator==(const ActionID &other) const -> bool = default;
 };

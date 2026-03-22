@@ -18,4 +18,4 @@ target_include_directories(
 
 target_link_libraries(
   lumina_core PRIVATE lumina_common lumina_platform_common lumina_renderer
-                      lumina_common_terminate)
+                      lumina_common_terminate lumina_data_parsers)

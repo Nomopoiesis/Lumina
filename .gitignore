@@ -1,3 +1,6 @@
+# local dev files
+local_dev/
+
 # Build directories
 build/
 out/

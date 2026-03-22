@@ -11,6 +11,7 @@
 #include <fstream>
 #include <print>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // --- Type mapping ---
@@ -214,6 +215,128 @@ static auto ElementTypeFromFormat(SpvReflectFormat format) -> std::string {
   }
 }
 
+// --- Nested struct/array helpers ---
+
+// Tracks struct type names already emitted to the namespace to avoid duplicates.
+static std::unordered_set<std::string> s_emitted_structs;
+
+// Returns the GLSL struct type name for a block variable that is a struct or
+// array-of-struct, or an empty string for primitive/vector/matrix members.
+static auto NestedStructTypeName(const SpvReflectBlockVariable *member)
+    -> std::string {
+  const auto *td = member->type_description;
+  if (!td) return "";
+  if (td->op == SpvOpTypeStruct && td->type_name != nullptr &&
+      td->type_name[0] != '\0')
+    return td->type_name;
+  // Array-of-struct: struct_type_description points to the element OpTypeStruct.
+  if (td->struct_type_description != nullptr &&
+      td->struct_type_description->type_name != nullptr &&
+      td->struct_type_description->type_name[0] != '\0')
+    return td->struct_type_description->type_name;
+  return "";
+}
+
+// Forward declaration.
+static void PreEmitNestedStructs(cppgen::Namespace &ns,
+                                  const SpvReflectBlockVariable *members,
+                                  uint32_t member_count);
+
+// Emits fields (with explicit byte-level padding) from a block variable member
+// list into the cppgen struct |s|. Any nested struct types that appear as field
+// types must already be present in |ns| before this call.
+static void EmitStructFields(cppgen::Namespace &ns, cppgen::Struct &s,
+                              const SpvReflectBlockVariable *members,
+                              uint32_t member_count, uint32_t total_size,
+                              int &pad_index) {
+  uint32_t current_offset = 0;
+  for (uint32_t k = 0; k < member_count; ++k) {
+    const auto *member = &members[k];
+    if (member->offset > current_offset) {
+      s.Add<cppgen::ArrayVariable>(
+          "uint8_t", "_pad" + std::to_string(pad_index++),
+          std::to_string(member->offset - current_offset));
+    }
+
+    const bool is_array = member->array.dims_count > 0;
+    const bool is_struct = member->member_count > 0;
+
+    if (is_struct) {
+      // Struct or array-of-struct member.
+      const std::string type_name = NestedStructTypeName(member);
+      if (is_array) {
+        uint32_t count = member->array.dims[0];
+        for (uint32_t d = 1; d < member->array.dims_count; ++d)
+          count *= member->array.dims[d];
+        s.Add<cppgen::ArrayVariable>(type_name, member->name,
+                                     std::to_string(count));
+      } else {
+        s.Add<cppgen::Variable>(type_name, member->name);
+      }
+    } else if (is_array) {
+      // Array of primitives/vectors/matrices.
+      // Use the deprecated type_description->members[0] to get the element type.
+      const auto *elem_td =
+          (member->type_description->member_count > 0 &&
+           member->type_description->members)
+              ? &member->type_description->members[0]
+              : member->type_description;
+      const auto type = DecideType(elem_td);
+      uint32_t count = member->array.dims[0];
+      for (uint32_t d = 1; d < member->array.dims_count; ++d)
+        count *= member->array.dims[d];
+      s.Add<cppgen::ArrayVariable>(TypeName(type), member->name,
+                                   std::to_string(count));
+    } else {
+      s.Add<cppgen::Variable>(TypeName(DecideType(member->type_description)),
+                               member->name);
+    }
+
+    current_offset = member->offset + member->size;
+    if (member->padded_size > member->size) {
+      const uint32_t pad_bytes = member->padded_size - member->size;
+      s.Add<cppgen::ArrayVariable>(
+          "uint8_t", "_pad" + std::to_string(pad_index++),
+          std::to_string(pad_bytes));
+      current_offset += pad_bytes;
+    }
+  }
+  if (total_size > 0 && current_offset < total_size) {
+    s.Add<cppgen::ArrayVariable>("uint8_t", "_tail_pad",
+                                  std::to_string(total_size - current_offset));
+  }
+}
+
+// Recursively emits struct type definitions for any struct-typed fields in
+// |members| (and their transitive dependencies) into |ns|, before the struct
+// that contains those fields is emitted.
+static void PreEmitNestedStructs(cppgen::Namespace &ns,
+                                  const SpvReflectBlockVariable *members,
+                                  uint32_t member_count) {
+  for (uint32_t k = 0; k < member_count; ++k) {
+    const auto *member = &members[k];
+    if (member->member_count == 0) continue;  // primitive/vector/matrix
+
+    const std::string type_name = NestedStructTypeName(member);
+    if (type_name.empty() || s_emitted_structs.count(type_name)) continue;
+    s_emitted_structs.insert(type_name);
+
+    // Recurse so transitive struct dependencies are emitted first.
+    PreEmitNestedStructs(ns, member->members, member->member_count);
+
+    // Per-element size: for arrays use the array stride; otherwise padded_size.
+    const uint32_t elem_size =
+        (member->array.dims_count > 0 && member->array.stride > 0)
+            ? member->array.stride
+            : member->padded_size;
+    auto &nested = ns.Add<cppgen::Struct>(type_name);
+    int nested_pad = 0;
+    EmitStructFields(ns, nested, member->members, member->member_count,
+                     elem_size, nested_pad);
+    ns.Add<cppgen::NewLine>();
+  }
+}
+
 // --- Binding name / descriptor-write helpers ---
 
 // Returns a usable name for a binding, falling back to the block type name
@@ -362,43 +485,17 @@ auto main(int argc, char **argv) -> int {
         continue;
       }
 
+      // Pre-emit any nested struct types used by this UBO's fields.
+      PreEmitNestedStructs(ns, binding->block.members,
+                           binding->block.member_count);
+
       const std::string struct_name = binding->type_description->type_name;
       auto &struct_ = ns.Add<cppgen::Struct>(struct_name);
 
-      uint32_t current_offset = 0;
       int pad_index = 0;
-
-      for (uint32_t k = 0; k < binding->block.member_count; ++k) {
-        auto *member = &binding->block.members[k];
-
-        // Gap before this member (e.g. explicit alignment padding)
-        if (member->offset > current_offset) {
-          struct_.Add<cppgen::ArrayVariable>(
-              "uint8_t", "_pad" + std::to_string(pad_index++),
-              std::to_string(member->offset - current_offset));
-        }
-
-        auto type = DecideType(member->type_description);
-        struct_.Add<cppgen::Variable>(TypeName(type), member->name);
-        current_offset = member->offset + member->size;
-
-        // Trailing padding between this member and the next
-        if (member->padded_size > member->size) {
-          const uint32_t pad_bytes = member->padded_size - member->size;
-          struct_.Add<cppgen::ArrayVariable>(
-              "uint8_t", "_pad" + std::to_string(pad_index++),
-              std::to_string(pad_bytes));
-          current_offset += pad_bytes;
-        }
-      }
-
-      // Tail padding to reach the declared block size
-      if (current_offset < binding->block.size) {
-        struct_.Add<cppgen::ArrayVariable>(
-            "uint8_t", "_tail_pad",
-            std::to_string(binding->block.size - current_offset));
-      }
-
+      EmitStructFields(ns, struct_, binding->block.members,
+                       binding->block.member_count, binding->block.size,
+                       pad_index);
       ns.Add<cppgen::NewLine>();
     }
   }
@@ -408,39 +505,13 @@ auto main(int argc, char **argv) -> int {
     auto *block = &module.push_constant_blocks[i];
     push_constant_struct_name = block->type_description->type_name;
     push_constant_offset = block->offset;
+
+    PreEmitNestedStructs(ns, block->members, block->member_count);
+
     auto &struct_ = ns.Add<cppgen::Struct>(push_constant_struct_name);
-
-    uint32_t current_offset = 0;
     int pad_index = 0;
-
-    for (uint32_t k = 0; k < block->member_count; ++k) {
-      auto *member = &block->members[k];
-
-      if (member->offset > current_offset) {
-        struct_.Add<cppgen::ArrayVariable>(
-            "uint8_t", "_pad" + std::to_string(pad_index++),
-            std::to_string(member->offset - current_offset));
-      }
-
-      auto type = DecideType(member->type_description);
-      struct_.Add<cppgen::Variable>(TypeName(type), member->name);
-      current_offset = member->offset + member->size;
-
-      if (member->padded_size > member->size) {
-        const uint32_t pad_bytes = member->padded_size - member->size;
-        struct_.Add<cppgen::ArrayVariable>("uint8_t",
-                                           "_pad" + std::to_string(pad_index++),
-                                           std::to_string(pad_bytes));
-        current_offset += pad_bytes;
-      }
-    }
-
-    if (current_offset < block->padded_size) {
-      struct_.Add<cppgen::ArrayVariable>(
-          "uint8_t", "_tail_pad",
-          std::to_string(block->padded_size - current_offset));
-    }
-
+    EmitStructFields(ns, struct_, block->members, block->member_count,
+                     block->padded_size, pad_index);
     ns.Add<cppgen::NewLine>();
   }
 

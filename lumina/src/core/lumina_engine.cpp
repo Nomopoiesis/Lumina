@@ -4,8 +4,10 @@
 
 #include "basic_geometry.hpp"
 #include "components/camera.hpp"
+#include "components/light_component.hpp"
 #include "components/static_mesh_component.hpp"
 #include "components/transform.hpp"
+#include "data_parsers/obj_parser.hpp"
 #include "input/input_action.hpp"
 #include "math/basic.hpp"
 
@@ -21,6 +23,20 @@ static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
   UniformBufferObject ubo = {};
   ubo.view = CalculateViewMatrix(transform);
   ubo.proj = camera.ToProjectionMatrix();
+  ubo.camera_position = transform.position;
+  ubo.point_light_count = 0;
+  world.ForEachComponent<LightComponent>(
+      [&ubo, &world](EntityID id, const LightComponent &component) -> void {
+        if (ubo.point_light_count >= 16) {
+          return;
+        }
+        ubo.point_lights[ubo.point_light_count++] = {
+            .position = world.GetComponent<Transform>(id).position,
+            .intensity = component.intensity,
+            .color = component.color,
+            .attenuation_radius = component.attenation_radius,
+        };
+      });
   memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
 }
@@ -84,6 +100,41 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   instance.input_dispatcher.RegisterHandler(
       instance.camera_movement_controller.get(), 10);
 
+  void *file_handle =
+      platform::common::PlatformServices::Instance().LuminaOpenFile(
+          R"(C:\projects\Lumina\lumina\data\models\suzanne.obj)");
+  std::size_t file_size =
+      platform::common::PlatformServices::Instance().LuminaGetFileSize(
+          file_handle);
+  common::data_structures::DataBuffer data_buffer(file_size);
+  platform::common::PlatformServices::Instance().LuminaReadFile(
+      file_handle, data_buffer.Data(), file_size);
+  platform::common::PlatformServices::Instance().LuminaCloseFile(file_handle);
+  auto obj_data = data_parsers::ParseOBJ(data_buffer.View());
+  auto static_mesh_handle = instance.static_mesh_manager.Create();
+  StaticMesh static_mesh;
+  static_mesh.vertex_count = obj_data.vertex_count;
+  static_mesh.vertex_attributes.emplace_back(
+      VertexAttribute{.type = VertexAttributeType::Position,
+                      .element_type = ElementType::Vec3},
+      std::vector<u8>(reinterpret_cast<u8 *>(obj_data.positions.data()),
+                      reinterpret_cast<u8 *>(obj_data.positions.data() +
+                                             obj_data.positions.size())));
+  static_mesh.vertex_attributes.emplace_back(
+      VertexAttribute{.type = VertexAttributeType::Normal,
+                      .element_type = ElementType::Vec3},
+      std::vector<u8>(reinterpret_cast<u8 *>(obj_data.normals.data()),
+                      reinterpret_cast<u8 *>(obj_data.normals.data() +
+                                             obj_data.normals.size())));
+  static_mesh.vertex_attributes.emplace_back(
+      VertexAttribute{.type = VertexAttributeType::TexCoord,
+                      .element_type = ElementType::Vec2},
+      std::vector<u8>(reinterpret_cast<u8 *>(obj_data.tex_coords.data()),
+                      reinterpret_cast<u8 *>(obj_data.tex_coords.data() +
+                                             obj_data.tex_coords.size())));
+  static_mesh.indices = obj_data.indices;
+  instance.static_mesh_manager.Set(static_mesh_handle, std::move(static_mesh));
+
   // Create the default world (scene)
   instance.current_world = std::make_unique<World>();
   auto &world = *instance.current_world;
@@ -105,29 +156,18 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   world.SetActiveCamera(entity_id);
   instance.camera_movement_controller->SetControlledEntity(entity_id);
 
-  auto static_mesh_handle = instance.static_mesh_manager.Create();
-  instance.static_mesh_manager.Set(static_mesh_handle, BasicGeometry::Quad());
-
   entity_id = world.CreateEntity();
-  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, 0.0F},
+  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -5.0F},
                                 math::Vec3{0.0F, 0.0F, 0.0F},
-                                math::Vec3{1.2F, 1.2F, 1.2F});
-  world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
-
-  entity_id = world.CreateEntity();
-  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -1.0F},
-                                math::Vec3{-45.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
   entity_id = world.CreateEntity();
-  auto cube_static_mesh_handle = instance.static_mesh_manager.Create();
-  instance.static_mesh_manager.Set(cube_static_mesh_handle,
-                                   BasicGeometry::Cube());
-  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -3.0F},
+  world.AddComponent<LightComponent>(
+      entity_id, LightType::Point, math::Vec3{1.0F, 1.0F, 1.0F}, 2.0F, 100.0F);
+  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 3.0F, -5.0F},
                                 math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
-  world.AddComponent<StaticMeshComponent>(entity_id, cube_static_mesh_handle);
 
   instance.is_initialized = true;
 }
@@ -160,24 +200,22 @@ auto LuminaEngine::ExecuteFrame() -> void {
   current_world->ForEachComponent<StaticMeshComponent>(
       [this](EntityID /*id*/, const StaticMeshComponent &component) {
         auto static_mesh_handle = component.GetStaticMeshHandle();
-        auto mesh = static_mesh_manager.Get(static_mesh_handle);
-        if (!mesh.has_value()) {
+        auto *mesh = static_mesh_manager.GetRef(static_mesh_handle);
+        if (mesh == nullptr) {
           return;
         }
         if (mesh->render_active) {
           return;
         }
         mesh->render_active = true;
-        static_mesh_manager.Set(static_mesh_handle, std::move(*mesh));
         auto *job = job_manager->AcquireJob();
         job->execute = [static_mesh_handle](void *data) -> void {
           auto *engine = static_cast<LuminaEngine *>(data);
-          auto m = engine->static_mesh_manager.Get(static_mesh_handle);
-          ASSERT(m.has_value(), "Static mesh not found");
+          auto *m = engine->static_mesh_manager.GetRef(static_mesh_handle);
+          ASSERT(m != nullptr, "Static mesh not found");
           auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
-              m.value(), engine->default_pipeline_handle);
+              *m, engine->default_pipeline_handle);
           m->render_mesh_handle = render_mesh_handle;
-          engine->static_mesh_manager.Set(static_mesh_handle, std::move(*m));
         };
         job->data = this;
         job_manager->SubmitJob(job);

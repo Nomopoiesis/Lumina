@@ -7,15 +7,9 @@
 
 namespace lumina::math {
 
-#ifdef LUMINA_VECTOR_DEFAULT_DOUBLE_PRECISION
-using DefaultVectorScalarType = f64;
-#else
-using DefaultVectorScalarType = f32;
-#endif
-
 class VectorBase {
 public:
-  using ScalarType = DefaultVectorScalarType;
+  using ScalarType = f32;
 };
 
 /**
@@ -612,30 +606,31 @@ public:
 
 // Vector concept, check that T has VectorBase as a base class
 template <typename T>
-concept VectorType = requires(T vec) { std::is_base_of_v<VectorBase, T>; };
+concept LuminaVectorType =
+    requires(T vec) { std::is_base_of_v<VectorBase, T>; };
 
-template <VectorType T>
+template <LuminaVectorType T>
 auto Normalize(const T &&vec) -> T {
   T result = vec;
   return result.Normalize();
 }
 
-template <VectorType T>
+template <LuminaVectorType T>
 auto Length(const T &&vec) -> typename T::ScalarType {
   return vec.Length();
 }
 
-template <VectorType T>
+template <LuminaVectorType T>
 auto LengthSqr(const T &&vec) -> typename T::ScalarType {
   return vec.LengthSqr();
 }
 
-template <VectorType T>
+template <LuminaVectorType T>
 auto operator*(T vec, const typename T::ScalarType scalar) -> T {
   return vec *= scalar;
 }
 
-template <VectorType T>
+template <LuminaVectorType T>
 auto operator*(const typename T::ScalarType scalar, T vec) -> T {
   return vec *= scalar;
 }

@@ -4,7 +4,6 @@ target_include_directories(
   lumina_renderer
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
          $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>
-         ${CMAKE_SOURCE_DIR}/lumina/data/shaders/generated
          ${CMAKE_SOURCE_DIR}/lumina/data/shaders/interfaces)
 
 target_sources(

@@ -8,7 +8,8 @@ layout(set = 1, binding = 1) uniform MaterialUniforms {
 }
 material_uniforms;
 
-layout(location = 0) in vec3 fragNormal;
-layout(location = 1) in vec2 fragTexCoord;
+layout(location = 0) in vec3 fragWorldPosition;
+layout(location = 1) in vec3 fragWorldNormal;
+layout(location = 2) in vec2 fragTexCoord;
 
 layout(location = 0) out vec4 outFragColor;

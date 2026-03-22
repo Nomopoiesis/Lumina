@@ -7,9 +7,19 @@
 #include <vulkan/vulkan.h>
 
 namespace lumina::shaders::interface::global {
+struct PointLight {
+  lumina::math::Vec3 position;
+  float intensity;
+  lumina::math::Vec3 color;
+  float attenuation_radius;
+}; // struct PointLight
+
 struct UniformBufferObject {
   lumina::math::Mat4 view;
   lumina::math::Mat4 proj;
+  PointLight point_lights[16];
+  lumina::math::Vec3 camera_position;
+  int32_t point_light_count;
 }; // struct UniformBufferObject
 
 struct PushConstants {

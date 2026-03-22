@@ -130,9 +130,9 @@ auto GetDefaultMaterialUBOSize() -> VkDeviceSize {
 auto InitDefaultMaterialUBO(void *mapped_data) -> void {
   using MU = shaders::simple_input_basic_mat::frag::MaterialUniforms;
   auto *mu = static_cast<MU *>(mapped_data);
-  mu->ambient_intensity = 0.0F;
+  mu->ambient_intensity = 0.05F;
   mu->ambient_color = {1.0F, 1.0F, 1.0F};
-  mu->diffuse_color = {1.0F, 0.0F, 0.0F};
+  mu->diffuse_color = {0.5F, 0.5F, 0.5F};
 }
 
 auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void {

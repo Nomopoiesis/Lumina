@@ -8,6 +8,9 @@ set_target_properties(lumina_src_dir PROPERTIES LUMINA_SRC_DIR
 # Add common headers library
 add_subdirectory(common)
 
+# Add data parsers module
+add_subdirectory(data_parsers)
+
 # Add core module
 add_subdirectory(core)
 

@@ -512,8 +512,8 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
                                VkDeviceMemory &texture_image_memory) -> bool {
   int tex_width = 0, tex_height = 0, tex_channels = 0;
   stbi_uc *pixels =
-      stbi_load("C:/Projects/c++/Lumina/lumina/data/textures/tex.png",
-                &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
+      stbi_load("C:/projects/Lumina/lumina/data/textures/tex.png", &tex_width,
+                &tex_height, &tex_channels, STBI_rgb_alpha);
   if (pixels == nullptr) {
     LOG_ERROR("Failed to load texture image");
     return false;

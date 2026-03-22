@@ -34,9 +34,19 @@ struct FrameTimeInfo {
   f64 total_time;
 };
 
+struct PointLight {
+  alignas(16) math::Vec3 position;
+  f32 intensity = 0.0F;
+  alignas(16) math::Vec3 color;
+  f32 attenuation_radius = 0.0F;
+};
+
 struct UniformBufferObject {
   alignas(16) math::Mat4 view;
   alignas(16) math::Mat4 proj;
+  PointLight point_lights[16];
+  alignas(16) math::Vec3 camera_position;
+  u32 point_light_count = 0;
 };
 
 class LuminaEngine {
