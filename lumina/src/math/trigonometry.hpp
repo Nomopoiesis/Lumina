@@ -20,7 +20,11 @@ inline auto RadiansToDegrees(f32 radians) -> f32 {
 
 inline auto Sin(f32 angle) -> f32 { return std::sin(angle); }
 
+inline auto ASin(f32 value) -> f32 { return std::asin(value); }
+
 inline auto Cos(f32 angle) -> f32 { return std::cos(angle); }
+
+inline auto ACos(f32 value) -> f32 { return std::acos(value); }
 
 inline auto Tan(f32 angle) -> f32 { return std::tan(angle); }
 

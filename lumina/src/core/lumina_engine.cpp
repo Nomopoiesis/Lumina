@@ -1,10 +1,10 @@
 #include "lumina_engine.hpp"
 
+#include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
 #include "common/path_registry.hpp"
 
 #include "basic_geometry.hpp"
-#include "mesh_cache.hpp"
 #include "components/camera.hpp"
 #include "components/light_component.hpp"
 #include "components/static_mesh_component.hpp"
@@ -12,6 +12,8 @@
 #include "data_parsers/obj_parser.hpp"
 #include "input/input_action.hpp"
 #include "math/basic.hpp"
+#include "math/trigonometry.hpp"
+#include "mesh_cache.hpp"
 
 namespace lumina::core {
 
@@ -41,6 +43,41 @@ static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
       });
   memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
+}
+
+static auto SpawnMeshEntities(World &world, u32 count,
+                              StaticMeshHandle mesh_handle,
+                              const math::Vec3 &origin, f32 radius) -> void {
+  using lumina::common::random::FastRandom;
+  constexpr f32 InvU32Max = 1.0F / 4294967295.0F;
+
+  for (u32 i = 0; i < count; ++i) {
+    // Uniform distribution within a sphere via spherical coordinates
+    const f32 u = static_cast<f32>(FastRandom()) * InvU32Max;
+    const f32 v = static_cast<f32>(FastRandom()) * InvU32Max;
+    const f32 w = static_cast<f32>(FastRandom()) * InvU32Max;
+
+    const f32 theta = math::ACos(1.0F - (2.0F * u));
+    const f32 phi = math::TWO_PI * v;
+    const f32 r = radius * std::cbrt(w);
+
+    const math::Vec3 position = {
+        origin.x + (r * math::Sin(theta) * math::Cos(phi)),
+        origin.y + (r * math::Sin(theta) * math::Sin(phi)),
+        origin.z + (r * math::Cos(theta)),
+    };
+
+    const math::Vec3 rotation = {
+        static_cast<f32>(FastRandom()) * InvU32Max * 360.0F,
+        static_cast<f32>(FastRandom()) * InvU32Max * 360.0F,
+        static_cast<f32>(FastRandom()) * InvU32Max * 360.0F,
+    };
+
+    auto entity_id = world.CreateEntity();
+    world.AddComponent<Transform>(entity_id, position, rotation,
+                                  math::Vec3{1.0F, 1.0F, 1.0F});
+    world.AddComponent<StaticMeshComponent>(entity_id, mesh_handle);
+  }
 }
 
 static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
@@ -103,7 +140,8 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       instance.camera_movement_controller.get(), 10);
 
   constexpr std::string_view kModelCacheKey = "suzanne";
-  const auto &model_cache = lumina::common::PathRegistry::Instance().model_cache;
+  const auto &model_cache =
+      lumina::common::PathRegistry::Instance().model_cache;
 
   StaticMesh static_mesh;
   if (HasCachedMesh(kModelCacheKey, model_cache)) {
@@ -190,10 +228,13 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                                 math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
+  SpawnMeshEntities(world, 100, static_mesh_handle,
+                    math::Vec3{0.0F, 0.0F, 0.0F}, 50.0F);
+
   entity_id = world.CreateEntity();
   world.AddComponent<LightComponent>(
-      entity_id, LightType::Point, math::Vec3{1.0F, 1.0F, 1.0F}, 2.0F, 100.0F);
-  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 3.0F, -5.0F},
+      entity_id, LightType::Point, math::Vec3{1.0F, 1.0F, 1.0F}, 2.0F, 200.0F);
+  world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
 
