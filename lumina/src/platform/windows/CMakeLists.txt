@@ -1,7 +1,8 @@
 add_executable(windows_lumina)
 
 target_sources(windows_lumina PRIVATE win_main.cpp win_window.cpp
-                                      win_platform_services.cpp)
+                                      win_platform_services.cpp
+                                      win_runtime_root.cpp)
 
 target_include_directories(
   windows_lumina PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
@@ -11,6 +12,7 @@ target_include_directories(
 set_target_properties(windows_lumina PROPERTIES WIN32_EXECUTABLE TRUE)
 # Output name (CMake will automatically add .exe on Windows)
 set_target_properties(windows_lumina PROPERTIES OUTPUT_NAME lumina)
+set(LUMINA_BIN_OUT_TARGET windows_lumina PARENT_SCOPE)
 
 target_compile_definitions(
   windows_lumina
@@ -24,7 +26,8 @@ add_subdirectory(vulkan)
 target_link_libraries(
   windows_lumina
   PRIVATE lumina_common lumina_logger lumina_platform_common
-          lumina_common_terminate windows_lumina_vulkan lumina_core)
+          lumina_common_terminate windows_lumina_vulkan lumina_core
+          lumina_path_registry)
 
 target_link_libraries(
   windows_lumina

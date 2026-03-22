@@ -1,5 +1,6 @@
 #include "static_shader_api.hpp"
 
+#include "common/path_registry.hpp"
 #include "headers/interface.global.hpp"
 #include "headers/simple_input_basic_mat.frag.hpp"
 #include "headers/simple_model_input.vert.hpp"
@@ -32,8 +33,12 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
       .shader_interface_index = shader_interface_index,
       .vertex_layout = vert::kLayout,
       .fragment_layout = frag::kLayout,
-      .vertex_shader_bin_path = "shaders/spv/shader.vert.spv",
-      .fragment_shader_bin_path = "shaders/spv/shader.frag.spv",
+      .vertex_shader_bin_path =
+          lumina::common::PathRegistry::Instance().shaders.Resolve(
+              "shader.vert.spv").string(),
+      .fragment_shader_bin_path =
+          lumina::common::PathRegistry::Instance().shaders.Resolve(
+              "shader.frag.spv").string(),
       .max_instances = 2,
   };
   auto mat_template_handle = renderer->CreateMaterialTemplate(mat_desc);

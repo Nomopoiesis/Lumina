@@ -5,7 +5,8 @@ target_sources(
   lumina_platform_common
   PRIVATE platform_services.cpp
   PUBLIC FILE_SET HEADERS BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES
-         platform_services.hpp)
+         platform_services.hpp
+         runtime_root.hpp)
 
 target_include_directories(
   lumina_platform_common

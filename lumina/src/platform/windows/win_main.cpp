@@ -8,8 +8,10 @@
 #include "core/lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
+#include "common/path_registry.hpp"
 #include "common/timer.hpp"
 #include "platform/common/platform_services.hpp"
+#include "platform/common/runtime_root.hpp"
 #include "win_platform_services.hpp"
 
 auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
@@ -25,6 +27,10 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   // Initialize platform services before using them
   InitPlatformServices();
+
+  // Initialize path registry rooted at the executable's directory
+  PathRegistry::Initialize(common::GetRuntimeRoot());
+  ScopeGuard path_registry_guard([]() -> void { PathRegistry::Shutdown(); });
 
   // Initialize logger; in this configuration we keep the console open
   // at shutdown until the user presses a key, so that validation and

@@ -3,6 +3,7 @@
 #include "common/data_structures/data_buffer.hpp"
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
+#include "common/path_registry.hpp"
 #include "common/lumina_terminate.hpp"
 #include "core/lumina_engine.hpp"
 #include "graphics_pipeline.hpp"
@@ -512,8 +513,9 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
                                VkDeviceMemory &texture_image_memory) -> bool {
   int tex_width = 0, tex_height = 0, tex_channels = 0;
   stbi_uc *pixels =
-      stbi_load("C:/projects/Lumina/lumina/data/textures/tex.png", &tex_width,
-                &tex_height, &tex_channels, STBI_rgb_alpha);
+      stbi_load(lumina::common::PathRegistry::Instance().textures.Resolve(
+                    "tex.png").string().c_str(),
+                &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
   if (pixels == nullptr) {
     LOG_ERROR("Failed to load texture image");
     return false;

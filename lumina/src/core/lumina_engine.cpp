@@ -1,6 +1,7 @@
 #include "lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
+#include "common/path_registry.hpp"
 
 #include "basic_geometry.hpp"
 #include "components/camera.hpp"
@@ -102,7 +103,10 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
 
   void *file_handle =
       platform::common::PlatformServices::Instance().LuminaOpenFile(
-          R"(C:\projects\Lumina\lumina\data\models\suzanne.obj)");
+          lumina::common::PathRegistry::Instance()
+              .models.Resolve("suzanne.obj")
+              .string()
+              .c_str());
   std::size_t file_size =
       platform::common::PlatformServices::Instance().LuminaGetFileSize(
           file_handle);

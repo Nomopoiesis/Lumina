@@ -121,11 +121,10 @@ auto ShaderModuleCache::GetShaderModule(const std::string &file_path,
                                         VkShaderStageFlagBits stage)
     -> std::expected<VkShaderModule, ShaderLoadError> {
   // Look up shader module in cache
-  auto full_path = "C:/projects/Lumina/lumina/data/" + file_path;
-  auto cache_it = shader_module_cache.find(full_path);
+  auto cache_it = shader_module_cache.find(file_path);
   if (cache_it == shader_module_cache.end()) {
     // Shader module not found in cache, create it
-    return CreateShaderModule(full_path, stage);
+    return CreateShaderModule(file_path, stage);
   }
 
   return cache_it->second.handle;

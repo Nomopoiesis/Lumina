@@ -18,3 +18,11 @@ elseif(APPLE)
   message(FATAL_ERROR "macOS is not supported yet")
   add_subdirectory(macos)
 endif()
+
+add_custom_target(lumina_install_runtime_data ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_SOURCE_DIR}/lumina/data/runtime"
+      "$<TARGET_FILE_DIR:${LUMINA_BIN_OUT_TARGET}>"
+  COMMENT "Installing runtime data to build output...")
+
+add_dependencies(lumina_install_runtime_data ${LUMINA_BIN_OUT_TARGET})

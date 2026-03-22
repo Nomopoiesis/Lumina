@@ -4,9 +4,9 @@ from pathlib import Path
 
 
 GLSLC_PATH = os.environ.get("GLSLC_PATH", "glslc")
-SPV_DIR = Path("lumina/data/shaders/spv")
-SHADER_INTERFACE_DIR = Path("lumina/data/shaders/interfaces")
-SHADER_SRC_DIR = Path("lumina/data/shaders/src")
+SPV_DIR = Path("lumina/data/runtime/shaders")
+SHADER_INTERFACE_DIR = Path("lumina/data/static/shaders/interfaces")
+SHADER_SRC_DIR = Path("lumina/data/static/shaders/src")
 CWD = Path.cwd()
 
 def compile_shaders():

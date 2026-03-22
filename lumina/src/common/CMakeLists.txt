@@ -22,7 +22,13 @@ target_sources(
             lumina_terminate.hpp
             data_structures/lock_free_pool.hpp
             data_structures/work_stealing_deque.hpp
-            data_structures/data_buffer.hpp)
+            data_structures/data_buffer.hpp
+            path_resolver.hpp)
+
+add_library(lumina_path_registry STATIC)
+target_sources(lumina_path_registry PRIVATE path_registry.cpp)
+target_include_directories(lumina_path_registry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(lumina_path_registry PUBLIC lumina_common)
 
 add_library(lumina_common_terminate STATIC)
 target_sources(lumina_common_terminate PRIVATE lumina_terminate.cpp)
