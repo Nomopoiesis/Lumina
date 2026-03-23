@@ -1,5 +1,7 @@
 #include "lumina_engine.hpp"
 
+#include <unordered_set>
+
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
 #include "common/path_registry.hpp"
@@ -119,7 +121,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
     LOG_CRITICAL("Failed to get default material instance");
     LUMINA_TERMINATE();
   }
-  auto mat_template_handle = mat_opt.value().GetTemplateHandle();
+  auto mat_template_handle = mat_opt.value()->GetTemplateHandle();
 
   instance.default_pipeline_handle = instance.renderer->CreateGraphicsPipeline(
       {.vertex_layout = renderer::VertexBufferLayout::Interleave(
@@ -198,8 +200,8 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
     }
   }
 
-  auto static_mesh_handle = instance.static_mesh_manager.Create();
-  instance.static_mesh_manager.Set(static_mesh_handle, std::move(static_mesh));
+  auto static_mesh_handle =
+      instance.static_mesh_manager.Create(std::move(static_mesh));
 
   // Create the default world (scene)
   instance.current_world = std::make_unique<World>();
@@ -238,6 +240,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                                 math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
 
+  instance.ProcessDeferredOperations();
   instance.is_initialized = true;
 }
 
@@ -260,31 +263,52 @@ auto LuminaEngine::BeginFrame(Timer &timer) -> void {
   frame_time_info.total_time += delta_time;
 }
 
+auto LuminaEngine::ProcessDeferredOperations() -> void {
+  static_mesh_manager.ProcessDeferredOperations();
+}
+
 auto LuminaEngine::EndFrame() -> void {
+  ProcessDeferredOperations();
   renderer->ReleaseFrameContextForUpdate();
 }
 
 auto LuminaEngine::ExecuteFrame() -> void {
-  // Dispatch upload jobs for any meshes not yet uploaded to the GPU
+  // Dispatch upload jobs for any meshes not yet uploaded to the GPU.
+  // Track dispatched handles locally to avoid multiple jobs for the same mesh
+  // when several entities share a handle (render_active update is deferred).
+  std::unordered_set<ResourceHandleIndexType> dispatched_mesh_uploads;
   current_world->ForEachComponent<StaticMeshComponent>(
-      [this](EntityID /*id*/, const StaticMeshComponent &component) {
+      [this, &dispatched_mesh_uploads](EntityID /*id*/,
+                                       const StaticMeshComponent &component) {
         auto static_mesh_handle = component.GetStaticMeshHandle();
-        auto *mesh = static_mesh_manager.GetRef(static_mesh_handle);
-        if (mesh == nullptr) {
+        if (dispatched_mesh_uploads.contains(static_mesh_handle.index)) {
           return;
         }
+        auto mesh_opt = static_mesh_manager.Get(static_mesh_handle);
+        if (!mesh_opt.has_value()) {
+          return;
+        }
+        auto &mesh = mesh_opt.value();
         if (mesh->render_active) {
           return;
         }
-        mesh->render_active = true;
+        dispatched_mesh_uploads.insert(static_mesh_handle.index);
+        static_mesh_manager.Update(
+            static_mesh_handle,
+            [](StaticMesh &mesh) -> void { mesh.render_active = true; });
         auto *job = job_manager->AcquireJob();
         job->execute = [static_mesh_handle](void *data) -> void {
           auto *engine = static_cast<LuminaEngine *>(data);
-          auto *m = engine->static_mesh_manager.GetRef(static_mesh_handle);
-          ASSERT(m != nullptr, "Static mesh not found");
+          auto m_opt = engine->static_mesh_manager.Get(static_mesh_handle);
+          ASSERT(m_opt.has_value(), "Static mesh not found");
+          auto &m = m_opt.value();
           auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
               *m, engine->default_pipeline_handle);
-          m->render_mesh_handle = render_mesh_handle;
+          engine->static_mesh_manager.Update(
+              static_mesh_handle,
+              [render_mesh_handle](StaticMesh &mesh) -> void {
+                mesh.render_mesh_handle = render_mesh_handle;
+              });
         };
         job->data = this;
         job_manager->SubmitJob(job);
@@ -311,12 +335,13 @@ auto LuminaEngine::ExecuteFrame() -> void {
     engine->current_world->ForEachComponent<StaticMeshComponent>(
         [engine, frame_context](EntityID id,
                                 const StaticMeshComponent &component) -> void {
-          auto mesh =
+          auto mesh_opt =
               engine->static_mesh_manager.Get(component.GetStaticMeshHandle());
           auto transform = engine->current_world->GetComponent<Transform>(id);
-          if (!mesh.has_value()) {
+          if (!mesh_opt.has_value()) {
             return;
           }
+          auto &mesh = mesh_opt.value();
           if (mesh->render_mesh_handle.index == INVALID_RESOURCE_HANDLE_INDEX) {
             return;
           }

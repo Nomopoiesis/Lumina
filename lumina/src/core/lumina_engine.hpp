@@ -136,6 +136,8 @@ private:
     return *instance;
   }
 
+  auto ProcessDeferredOperations() -> void;
+
   bool is_initialized = false;
 
   bool trap_cursor = false;

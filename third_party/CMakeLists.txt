@@ -8,8 +8,21 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE # Download only the latest commit to save time (no full
                    # history needed)
 )
-
 FetchContent_MakeAvailable(glm)
+
+# Download Clay - https://github.com/nicbarker/clay
+FetchContent_Declare(
+  clay
+  GIT_REPOSITORY https://github.com/nicbarker/clay.git
+  GIT_TAG v0.14
+  GIT_SHALLOW TRUE # Download only the latest commit to save time (no full
+                   # history needed)
+)
+# Disable all examples to save space
+set(CLAY_INCLUDE_ALL_EXAMPLES
+    OFF
+    CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(clay)
 
 # external stb_truetype.h
 add_library(lumina_stb INTERFACE)

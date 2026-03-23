@@ -33,12 +33,12 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
       .shader_interface_index = shader_interface_index,
       .vertex_layout = vert::kLayout,
       .fragment_layout = frag::kLayout,
-      .vertex_shader_bin_path =
-          lumina::common::PathRegistry::Instance().shaders.Resolve(
-              "shader.vert.spv").string(),
-      .fragment_shader_bin_path =
-          lumina::common::PathRegistry::Instance().shaders.Resolve(
-              "shader.frag.spv").string(),
+      .vertex_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                    .shaders.Resolve("shader.vert.spv")
+                                    .string(),
+      .fragment_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                      .shaders.Resolve("shader.frag.spv")
+                                      .string(),
       .max_instances = 2,
   };
   auto mat_template_handle = renderer->CreateMaterialTemplate(mat_desc);
@@ -143,9 +143,10 @@ auto InitDefaultMaterialUBO(void *mapped_data) -> void {
 auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void {
   namespace mat = shaders::simple_input_basic_mat::frag;
 
-  auto *instance = renderer->material_instance_manager.GetRef(
+  auto instance_opt = renderer->material_instance_manager.Get(
       renderer->default_material_instance_handle);
-  ASSERT(instance != nullptr, "Default material instance not found");
+  ASSERT(instance_opt.has_value(), "Default material instance not found");
+  auto &instance = instance_opt.value();
 
   mat::BindingData bindings{
       .texSampler_sampler = renderer->texture_sampler,

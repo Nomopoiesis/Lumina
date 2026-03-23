@@ -105,22 +105,22 @@ public:
   }
 
   [[nodiscard]] auto GetMaterialInstance(MaterialInstanceHandle handle) noexcept
-      -> std::optional<MaterialInstance> {
+      -> std::optional<const MaterialInstance *> {
     return material_instance_manager.Get(handle);
   }
 
   [[nodiscard]] auto GetMaterialTemplate(MaterialTemplateHandle handle) noexcept
-      -> std::optional<MaterialTemplate> {
+      -> std::optional<const MaterialTemplate *> {
     return material_template_manager.Get(handle);
   }
 
   [[nodiscard]] auto GetMaterialTemplate(MaterialInstanceHandle handle) noexcept
-      -> std::optional<MaterialTemplate> {
+      -> std::optional<const MaterialTemplate *> {
     auto instance_opt = GetMaterialInstance(handle);
     if (!instance_opt) {
       return std::nullopt;
     }
-    return GetMaterialTemplate(instance_opt.value().GetTemplateHandle());
+    return GetMaterialTemplate(instance_opt.value()->GetTemplateHandle());
   }
 
   auto SetDefaultMaterialTemplate(MaterialTemplateHandle handle) -> void {
@@ -139,6 +139,8 @@ private:
   auto ReleaseFrameContextForRender() -> void;
 
   auto TryReclaimFrameContexts() -> void;
+
+  auto ProcessDeferredOperations() -> void;
 
   auto ReleaseCommandContext(CommandContext &cmd_ctx) -> void;
 
