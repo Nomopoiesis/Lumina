@@ -115,25 +115,6 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
 
-  auto mat_handle = instance.renderer->GetDefaultMaterialInstanceHandle();
-  auto mat_opt = instance.renderer->GetMaterialInstance(mat_handle);
-  if (!mat_opt.has_value()) {
-    LOG_CRITICAL("Failed to get default material instance");
-    LUMINA_TERMINATE();
-  }
-  auto mat_template_handle = mat_opt.value()->GetTemplateHandle();
-
-  instance.default_pipeline_handle = instance.renderer->CreateGraphicsPipeline(
-      {.vertex_layout = renderer::VertexBufferLayout::Interleave(
-           std::span<const VertexAttribute>(
-               {VertexAttribute{.type = VertexAttributeType::Position,
-                                .element_type = ElementType::Vec3},
-                VertexAttribute{.type = VertexAttributeType::Normal,
-                                .element_type = ElementType::Vec3},
-                VertexAttribute{.type = VertexAttributeType::TexCoord,
-                                .element_type = ElementType::Vec2}})),
-       .material_template = mat_template_handle});
-
   instance.camera_movement_controller =
       std::make_unique<CameraMovementController>(INVALID_ENTITY_ID);
 
@@ -303,7 +284,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
           ASSERT(m_opt.has_value(), "Static mesh not found");
           auto &m = m_opt.value();
           auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
-              *m, engine->default_pipeline_handle);
+              *m, engine->GetRenderer().GetDefaultGraphicsPipelineHandle());
           engine->static_mesh_manager.Update(
               static_mesh_handle,
               [render_mesh_handle](StaticMesh &mesh) -> void {

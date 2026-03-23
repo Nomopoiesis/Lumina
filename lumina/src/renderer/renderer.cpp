@@ -653,25 +653,24 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   // are destroyed before the command pool.
   frame_contexts.clear();
 
-  render_mesh_manager.DestroyAll(
-      [this](RenderMeshHandle handle, const RenderMesh &mesh) -> void {
-        for (const auto &stream : mesh.vertex_streams) {
-          if (stream.buffer != VK_NULL_HANDLE) {
-            vkDestroyBuffer(vulkan_context.GetDevice(), stream.buffer, nullptr);
-          }
-          if (stream.memory != VK_NULL_HANDLE) {
-            vkFreeMemory(vulkan_context.GetDevice(), stream.memory, nullptr);
-          }
-        }
-        if (mesh.index_buffer != VK_NULL_HANDLE) {
-          vkDestroyBuffer(vulkan_context.GetDevice(), mesh.index_buffer,
-                          nullptr);
-        }
-        if (mesh.index_buffer_memory != VK_NULL_HANDLE) {
-          vkFreeMemory(vulkan_context.GetDevice(), mesh.index_buffer_memory,
-                       nullptr);
-        }
-      });
+  render_mesh_manager.DestroyAll([this](RenderMeshHandle handle,
+                                        const RenderMesh &mesh) -> void {
+    for (const auto &stream : mesh.vertex_streams) {
+      if (stream.buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(vulkan_context.GetDevice(), stream.buffer, nullptr);
+      }
+      if (stream.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(vulkan_context.GetDevice(), stream.memory, nullptr);
+      }
+    }
+    if (mesh.index_buffer != VK_NULL_HANDLE) {
+      vkDestroyBuffer(vulkan_context.GetDevice(), mesh.index_buffer, nullptr);
+    }
+    if (mesh.index_buffer_memory != VK_NULL_HANDLE) {
+      vkFreeMemory(vulkan_context.GetDevice(), mesh.index_buffer_memory,
+                   nullptr);
+    }
+  });
   render_mesh_manager.ProcessDeferredOperations();
 
   if (depth_image_view != VK_NULL_HANDLE) {
@@ -989,6 +988,26 @@ auto LuminaRenderer::Initialize() -> void {
   AllocatePersistentDescriptorSets(default_material_instance_handle);
   ProcessDeferredOperations();
   WriteDefaultMaterialDescriptors(this);
+
+  {
+    auto mat_opt =
+        material_instance_manager.Get(default_material_instance_handle);
+    ASSERT(mat_opt.has_value(), "Default material instance not found");
+    default_pipeline_handle = CreateGraphicsPipeline(
+        {.vertex_layout = VertexBufferLayout::Interleave(
+             std::span<const core::VertexAttribute>(
+                 {core::VertexAttribute{
+                      .type = core::VertexAttributeType::Position,
+                      .element_type = core::ElementType::Vec3},
+                  core::VertexAttribute{
+                      .type = core::VertexAttributeType::Normal,
+                      .element_type = core::ElementType::Vec3},
+                  core::VertexAttribute{
+                      .type = core::VertexAttributeType::TexCoord,
+                      .element_type = core::ElementType::Vec2}})),
+         .material_template = mat_opt.value()->GetTemplateHandle()});
+    ProcessDeferredOperations();
+  }
 
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
 } // namespace lumina::renderer
@@ -1733,7 +1752,7 @@ auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
 auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
                                       GraphicsPipelineHandle pipeline_handle)
     -> RenderMeshHandle {
-  auto pipeline_opt = pipeline_manager.Get(pipeline_handle, true);
+  auto pipeline_opt = pipeline_manager.Get(pipeline_handle);
   ASSERT(pipeline_opt.has_value(),
          "Pipeline not found for render mesh creation");
   auto &pipeline = pipeline_opt.value();

@@ -104,6 +104,11 @@ public:
     return default_material_instance_handle;
   }
 
+  [[nodiscard]] auto GetDefaultGraphicsPipelineHandle() const noexcept
+      -> GraphicsPipelineHandle {
+    return default_pipeline_handle;
+  }
+
   [[nodiscard]] auto GetMaterialInstance(MaterialInstanceHandle handle) noexcept
       -> std::optional<const MaterialInstance *> {
     return material_instance_manager.Get(handle);
@@ -210,6 +215,7 @@ private:
 
   MaterialTemplateHandle default_material_template_handle;
   MaterialInstanceHandle default_material_instance_handle;
+  GraphicsPipelineHandle default_pipeline_handle;
 
   RenderMeshManager render_mesh_manager;
   MaterialTemplateManager material_template_manager;
