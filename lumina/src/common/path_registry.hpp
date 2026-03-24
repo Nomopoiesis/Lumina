@@ -21,11 +21,13 @@ public:
   const PathResolver textures;
   const PathResolver models;
   const PathResolver model_cache;
+  const PathResolver fonts;
 
 private:
   explicit PathRegistry(const std::filesystem::path &root)
       : shaders(root / "shaders"), textures(root / "textures"),
-        models(root / "models"), model_cache(root / "model_cache") {}
+        models(root / "models"), model_cache(root / "model_cache"),
+        fonts(root / "fonts") {}
 
   static PathRegistry *instance_;
 };

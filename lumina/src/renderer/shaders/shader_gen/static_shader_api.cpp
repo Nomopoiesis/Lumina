@@ -160,6 +160,27 @@ auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void {
   }
 }
 
+auto UpdateDefaultMaterialTexture(LuminaRenderer *renderer, VkSampler sampler,
+                                   VkImageView image_view) -> void {
+  namespace mat = shaders::simple_input_basic_mat::frag;
+
+  auto instance_opt = renderer->material_instance_manager.Get(
+      renderer->default_material_instance_handle);
+  ASSERT(instance_opt.has_value(), "Default material instance not found");
+  auto &instance = instance_opt.value();
+
+  mat::BindingData bindings{
+      .texSampler_sampler = sampler,
+      .texSampler_imageView = image_view,
+      .material_uniforms_buffer = renderer->default_material_ubo_buffer,
+  };
+
+  auto *device = renderer->vulkan_context.GetDevice();
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    mat::WriteDescriptors(device, instance->GetDescriptorSet(i), bindings);
+  }
+}
+
 auto WriteTransientDescriptors(LuminaRenderer *renderer,
                                FrameContext &frame_context,
                                VkDescriptorSet descriptor_set) -> void {

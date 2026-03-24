@@ -1,6 +1,5 @@
 CompileFlags:
   CompilationDatabase: build/Debug
-  Compiler: "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang-cl.exe"
   Add: 
     - -std=c++23
     - -fms-compatibility
@@ -42,4 +41,9 @@ Diagnostics:
       - readability-convert-member-functions-to-static
       - readability-identifier-length
       - cppcoreguidelines-avoid-do-while
-      
+
+---
+If:
+  PathMatch: (^|.*/)build/.*
+Diagnostics:
+  Suppress: ['*']

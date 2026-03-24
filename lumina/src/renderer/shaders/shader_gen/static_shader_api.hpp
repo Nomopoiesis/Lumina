@@ -23,6 +23,11 @@ auto InitDefaultMaterialUBO(void *mapped_data) -> void;
 // using the generated WriteDescriptors function.
 auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void;
 
+// Re-writes only the texture binding of the default material's descriptor sets.
+// Safe to call from the render thread (e.g. a command-context completion callback).
+auto UpdateDefaultMaterialTexture(LuminaRenderer *renderer, VkSampler sampler,
+                                   VkImageView image_view) -> void;
+
 // Writes per-frame transient descriptor sets (set 0)
 // using the generated WriteDescriptors function.
 auto WriteTransientDescriptors(LuminaRenderer *renderer,

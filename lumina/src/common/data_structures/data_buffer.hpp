@@ -100,6 +100,15 @@ public:
   [[nodiscard]] auto View(size_t offset, size_t size) const noexcept
       -> DataBufferView;
 
+  auto Clear(u8 clear_value = 0) noexcept -> void {
+    std::memset(data_.get(), clear_value, size_);
+  }
+
+  auto Reset() noexcept -> void {
+    data_ = nullptr;
+    size_ = 0;
+  }
+
 private:
   std::unique_ptr<u8[]> data_ = nullptr;
   size_t size_ = 0;

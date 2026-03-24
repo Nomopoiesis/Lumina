@@ -653,6 +653,23 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   // are destroyed before the command pool.
   frame_contexts.clear();
 
+  render_texture_manager.DestroyAll([this](RenderTextureHandle /*handle*/,
+                                           const RenderTexture &rt) -> void {
+    if (rt.sampler != VK_NULL_HANDLE) {
+      vkDestroySampler(vulkan_context.GetDevice(), rt.sampler, nullptr);
+    }
+    if (rt.image_view != VK_NULL_HANDLE) {
+      vkDestroyImageView(vulkan_context.GetDevice(), rt.image_view, nullptr);
+    }
+    if (rt.image != VK_NULL_HANDLE) {
+      vkDestroyImage(vulkan_context.GetDevice(), rt.image, nullptr);
+    }
+    if (rt.memory != VK_NULL_HANDLE) {
+      vkFreeMemory(vulkan_context.GetDevice(), rt.memory, nullptr);
+    }
+  });
+  render_texture_manager.ProcessDeferredOperations();
+
   render_mesh_manager.DestroyAll([this](RenderMeshHandle handle,
                                         const RenderMesh &mesh) -> void {
     for (const auto &stream : mesh.vertex_streams) {
@@ -818,6 +835,7 @@ auto LuminaRenderer::TryReclaimFrameContexts() -> void {
 }
 
 auto LuminaRenderer::ProcessDeferredOperations() -> void {
+  render_texture_manager.ProcessDeferredOperations();
   render_mesh_manager.ProcessDeferredOperations();
   material_template_manager.ProcessDeferredOperations();
   material_instance_manager.ProcessDeferredOperations();
@@ -1009,16 +1027,65 @@ auto LuminaRenderer::Initialize() -> void {
     ProcessDeferredOperations();
   }
 
+  ui_renderer.Initialize(vulkan_context,
+                         lumina::common::PathRegistry::Instance()
+                             .shaders.Resolve("ui.vert.spv")
+                             .string(),
+                         lumina::common::PathRegistry::Instance()
+                             .shaders.Resolve("ui.frag.spv")
+                             .string(),
+                         depth_stencil_format);
+
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
 } // namespace lumina::renderer
 
 auto LuminaRenderer::Shutdown() -> void {
   shutdown_requested = true;
   render_thread.join();
+  DeviceWaitIdle();
+  ui_renderer.Shutdown(vulkan_context);
 }
 
 auto LuminaRenderer::DeviceWaitIdle() -> void {
   vkDeviceWaitIdle(vulkan_context.GetDevice());
+}
+
+auto LuminaRenderer::DrawUI(FrameContext &frame_context,
+                            VkCommandBuffer command_buffer, u32 image_index)
+    -> void {
+
+  auto swap_chain_image_extent = vulkan_context.GetSwapChainImageExtent();
+  VkRenderingAttachmentInfo color_attachment_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+      .pNext = nullptr,
+      .imageView = vulkan_context.GetSwapChainImageView(image_index),
+      .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+      .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+  };
+
+  VkRenderingInfo rendering_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
+      .pNext = nullptr,
+      .renderArea =
+          {
+              .offset = {0, 0},
+              .extent = swap_chain_image_extent,
+          },
+      .layerCount = 1,
+      .colorAttachmentCount = 1,
+      .pColorAttachments = &color_attachment_info,
+      .pDepthAttachment = nullptr,
+      .pStencilAttachment = nullptr,
+  };
+  vkCmdBeginRendering(command_buffer, &rendering_info);
+
+  ui_renderer.RecordCommands(
+      command_buffer, static_cast<u32>(current_frame_index),
+      frame_context.ui_batch, swap_chain_image_extent.width,
+      swap_chain_image_extent.height, vulkan_context);
+
+  vkCmdEndRendering(command_buffer);
 }
 
 auto LuminaRenderer::DrawFrame() -> void {
@@ -1051,11 +1118,55 @@ auto LuminaRenderer::DrawFrame() -> void {
     LUMINA_TERMINATE();
   }
 
+  const auto &command_buffer = frame_context.GetCommandBuffer();
+  VkCommandBufferBeginInfo command_buffer_begin_info = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      .pNext = nullptr,
+      .flags = 0,
+      .pInheritanceInfo = nullptr,
+  };
+  if (vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info) !=
+      VK_SUCCESS) {
+    LOG_CRITICAL("Failed to begin command buffer");
+    LUMINA_TERMINATE();
+  }
+
   if (auto record_command_buffer_result =
-          RecordCommandBuffer(frame_context, image_index);
+          RecordCommandBuffer(frame_context, command_buffer, image_index);
       !record_command_buffer_result) {
     LOG_CRITICAL("Failed to record command buffer: {}",
                  record_command_buffer_result.error().message);
+    LUMINA_TERMINATE();
+  }
+
+  DrawUI(frame_context, command_buffer, image_index);
+
+  VkImageMemoryBarrier image_memory_barrier = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .pNext = nullptr,
+      .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = 0,
+      .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = vulkan_context.GetSwapChainImage(image_index),
+      .subresourceRange =
+          {
+              .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+              .baseMipLevel = 0,
+              .levelCount = 1,
+              .baseArrayLayer = 0,
+              .layerCount = 1,
+          },
+  };
+  vkCmdPipelineBarrier(command_buffer,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &image_memory_barrier);
+
+  if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
+    LOG_CRITICAL("Failed to end command buffer");
     LUMINA_TERMINATE();
   }
 
@@ -1547,22 +1658,9 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
 }
 
 auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
+                                         VkCommandBuffer command_buffer,
                                          u32 image_index) noexcept
     -> std::expected<void, VkInitializationError> {
-  const auto &command_buffer = frame_context.GetCommandBuffer();
-  VkCommandBufferBeginInfo command_buffer_begin_info = {
-      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .pInheritanceInfo = nullptr,
-  };
-
-  if (vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info) !=
-      VK_SUCCESS) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to begin command buffer"});
-  }
-
   VkImageMemoryBarrier depth_image_memory_barrier = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
       .pNext = nullptr,
@@ -1724,20 +1822,6 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
 
   vkCmdEndRendering(command_buffer);
 
-  image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-  image_memory_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  image_memory_barrier.dstAccessMask = 0;
-  vkCmdPipelineBarrier(command_buffer,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
-                       nullptr, 1, &image_memory_barrier);
-
-  if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
-    return std::unexpected(
-        VkInitializationError{.message = "Failed to end command buffer"});
-  }
-
   return std::expected<void, VkInitializationError>{};
 }
 
@@ -1836,4 +1920,154 @@ auto LuminaRenderer::DestroyRenderMesh(RenderMeshHandle handle) -> void {
 auto LuminaRenderer::SubmitCommandContext(CommandContext &cmd_ctx) -> void {
   global_submission_queue.Push(&cmd_ctx);
 }
+
+auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
+    -> RenderTextureHandle {
+  VkFormat vk_format = VK_FORMAT_UNDEFINED;
+  u32 bytes_per_pixel = 0;
+  switch (texture.format) {
+    case core::TextureFormat::R8_Unorm:
+      vk_format = VK_FORMAT_R8_UNORM;
+      bytes_per_pixel = 1;
+      break;
+    case core::TextureFormat::RGBA8_Srgb:
+      vk_format = VK_FORMAT_R8G8B8A8_SRGB;
+      bytes_per_pixel = 4;
+      break;
+  }
+
+  const VkDeviceSize image_size = static_cast<VkDeviceSize>(texture.width) *
+                                  texture.height * bytes_per_pixel;
+
+  VkBuffer staging_buffer = VK_NULL_HANDLE;
+  VkDeviceMemory staging_buffer_memory = VK_NULL_HANDLE;
+  CreateBuffer(vulkan_context, image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+               VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               staging_buffer_memory, staging_buffer);
+  void *mapped = nullptr;
+  vkMapMemory(vulkan_context.GetDevice(), staging_buffer_memory, 0, image_size,
+              0, &mapped);
+  memcpy(mapped, texture.pixels.Data(), static_cast<size_t>(image_size));
+  vkUnmapMemory(vulkan_context.GetDevice(), staging_buffer_memory);
+
+  RenderTexture render_texture;
+  auto image_created = CreateImage(
+      vulkan_context, render_texture.image, texture.width, texture.height,
+      render_texture.memory, vk_format, VK_IMAGE_TILING_OPTIMAL,
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  ASSERT(image_created, "Failed to create render texture image");
+
+  auto &cmd_ctx = AcquireCommandContext();
+  cmd_ctx.Begin();
+
+  // Transition UNDEFINED → TRANSFER_DST
+  VkImageMemoryBarrier barrier = {};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = render_texture.image;
+  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  barrier.srcAccessMask = 0;
+  barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  vkCmdPipelineBarrier(
+      cmd_ctx.command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+  // Copy staging buffer → image
+  VkBufferImageCopy region = {};
+  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.imageExtent = {texture.width, texture.height, 1};
+  vkCmdCopyBufferToImage(cmd_ctx.command_buffer, staging_buffer,
+                         render_texture.image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+  // Transition TRANSFER_DST → SHADER_READ_ONLY
+  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(cmd_ctx.command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  cmd_ctx.End();
+
+  auto image_view_result = vulkan_context.CreateImageView(
+      render_texture.image, vk_format, VK_IMAGE_ASPECT_COLOR_BIT);
+  ASSERT(image_view_result, "Failed to create render texture image view");
+  render_texture.image_view = image_view_result.value();
+
+  VkSamplerCreateInfo sampler_info = {};
+  sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  sampler_info.magFilter = VK_FILTER_LINEAR;
+  sampler_info.minFilter = VK_FILTER_LINEAR;
+  const auto address_mode = (texture.format == core::TextureFormat::R8_Unorm)
+                                ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+                                : VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  sampler_info.addressModeU = address_mode;
+  sampler_info.addressModeV = address_mode;
+  sampler_info.addressModeW = address_mode;
+  sampler_info.anisotropyEnable = VK_FALSE;
+  sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+  sampler_info.unnormalizedCoordinates = VK_FALSE;
+  sampler_info.compareEnable = VK_FALSE;
+  sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+  sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+  vkCreateSampler(vulkan_context.GetDevice(), &sampler_info, nullptr,
+                  &render_texture.sampler);
+
+  auto rt_image_view = render_texture.image_view;
+  auto rt_sampler = render_texture.sampler;
+  const bool is_font_atlas = (vk_format == VK_FORMAT_R8_UNORM);
+  auto handle = render_texture_manager.Create(std::move(render_texture));
+  cmd_ctx.AddCompletionCallback(
+      [staging_buffer, staging_buffer_memory, handle, is_font_atlas,
+       render_texture_manager = &this->render_texture_manager, renderer = this,
+       rt_image_view, rt_sampler](CommandContext *ctx) -> void {
+        vkDestroyBuffer(ctx->vulkan_context->GetDevice(), staging_buffer,
+                        nullptr);
+        vkFreeMemory(ctx->vulkan_context->GetDevice(), staging_buffer_memory,
+                     nullptr);
+        render_texture_manager->Update(
+            handle, [](RenderTexture &rt) -> void { rt.ready = true; });
+        UpdateDefaultMaterialTexture(renderer, rt_sampler, rt_image_view);
+        if (is_font_atlas) {
+          renderer->ui_renderer.SetFontAtlas(*ctx->vulkan_context,
+                                             rt_image_view, rt_sampler);
+        }
+      });
+  SubmitCommandContext(cmd_ctx);
+  return handle;
+}
+
+auto LuminaRenderer::DestroyRenderTexture(RenderTextureHandle handle) -> void {
+  render_texture_manager.Destroy(
+      handle, [vulkan_context = &this->vulkan_context](
+                  RenderTextureHandle /*handle*/, const RenderTexture &rt) {
+        if (rt.sampler != VK_NULL_HANDLE) {
+          vkDestroySampler(vulkan_context->GetDevice(), rt.sampler, nullptr);
+        }
+        if (rt.image_view != VK_NULL_HANDLE) {
+          vkDestroyImageView(vulkan_context->GetDevice(), rt.image_view,
+                             nullptr);
+        }
+        if (rt.image != VK_NULL_HANDLE) {
+          vkDestroyImage(vulkan_context->GetDevice(), rt.image, nullptr);
+        }
+        if (rt.memory != VK_NULL_HANDLE) {
+          vkFreeMemory(vulkan_context->GetDevice(), rt.memory, nullptr);
+        }
+      });
+}
+
+auto LuminaRenderer::GetRenderTexture(RenderTextureHandle handle) noexcept
+    -> std::optional<const RenderTexture *> {
+  return render_texture_manager.Get(handle);
+}
+
 } // namespace lumina::renderer

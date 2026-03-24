@@ -16,6 +16,7 @@ target_sources(
           material_instance.cpp
           material_template.cpp
           vertex_serializer.cpp
+          ui_renderer.cpp
           shaders/shader_module_cache.cpp
           shaders/shader_interface.cpp
           shaders/shader_gen/static_shader_api.cpp)

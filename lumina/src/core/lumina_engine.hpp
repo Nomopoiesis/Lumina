@@ -10,6 +10,8 @@
 #include "math/matrix.hpp"
 
 #include "camera_movement_controller.hpp"
+#include "font.hpp"
+#include "texture.hpp"
 #include "input/input_dispatcher.hpp"
 #include "input/input_state.hpp"
 #include "job_system/job_manager.hpp"
@@ -18,6 +20,8 @@
 #include "world.hpp"
 
 namespace lumina::core {
+
+class UISystem;
 
 struct WindowDimensions {
   u32 width;
@@ -128,13 +132,10 @@ public:
   auto EndFrame() -> void;
 
 private:
-  LuminaEngine() noexcept = default;
-  ~LuminaEngine() noexcept = default;
+  LuminaEngine() noexcept;
+  ~LuminaEngine() noexcept;
 
-  static auto GetStaticInstance() -> LuminaEngine & {
-    static auto *instance = new LuminaEngine(); // NOLINT
-    return *instance;
-  }
+  static auto GetStaticInstance() -> LuminaEngine &;
 
   auto ProcessDeferredOperations() -> void;
 
@@ -156,6 +157,10 @@ private:
   std::unique_ptr<World> current_world;
 
   StaticMeshManager static_mesh_manager;
+  TextureManager texture_manager;
+
+  std::unordered_map<std::string, Font> fonts;
+  std::unique_ptr<UISystem> ui_system;
 };
 
 } // namespace lumina::core

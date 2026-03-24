@@ -12,14 +12,170 @@
 #include "components/static_mesh_component.hpp"
 #include "components/transform.hpp"
 #include "data_parsers/obj_parser.hpp"
+#include "font.hpp"
 #include "input/input_action.hpp"
 #include "math/basic.hpp"
 #include "math/trigonometry.hpp"
 #include "mesh_cache.hpp"
+#include "ui/ui_system.hpp"
 
 namespace lumina::core {
 
+LuminaEngine::LuminaEngine() noexcept {}
+LuminaEngine::~LuminaEngine() noexcept = default;
+
+auto LuminaEngine::GetStaticInstance() -> LuminaEngine & {
+  static auto *instance = new LuminaEngine(); // NOLINT
+  return *instance;
+}
+
 using namespace lumina::core::components;
+
+static auto BuildUIBatch(Clay_RenderCommandArray commands, UISystem &ui_system,
+                         renderer::UIRenderBatch &batch) -> void {
+  batch.Reset();
+  bool has_active_scissor = false;
+  VkRect2D current_scissor{};
+  u32 draw_call_index_start = 0;
+
+  auto flush_draw_call = [&]() {
+    const u32 count =
+        static_cast<u32>(batch.indices.size()) - draw_call_index_start;
+    if (count == 0) {
+      return;
+    }
+    batch.draw_calls.push_back(renderer::UIDrawCall{
+        .index_offset = draw_call_index_start,
+        .index_count = count,
+        .has_scissor = has_active_scissor,
+        .scissor = current_scissor,
+    });
+    draw_call_index_start = static_cast<u32>(batch.indices.size());
+  };
+
+  for (i32 i = 0; i < commands.length; ++i) {
+    const Clay_RenderCommand &cmd = commands.internalArray[i];
+    const auto &bb = cmd.boundingBox;
+
+    switch (cmd.commandType) {
+      case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
+        const auto &rect = cmd.renderData.rectangle;
+        const math::Vec4 color{
+            rect.backgroundColor.r / 255.0F,
+            rect.backgroundColor.g / 255.0F,
+            rect.backgroundColor.b / 255.0F,
+            rect.backgroundColor.a / 255.0F,
+        };
+        const auto base = static_cast<u32>(batch.vertices.size());
+        batch.vertices.push_back({.position = {bb.x, bb.y},
+                                  .uv = {0.0F, 0.0F},
+                                  .color = color,
+                                  .mode = 0u});
+        batch.vertices.push_back({.position = {bb.x + bb.width, bb.y},
+                                  .uv = {1.0F, 0.0F},
+                                  .color = color,
+                                  .mode = 0u});
+        batch.vertices.push_back(
+            {.position = {bb.x + bb.width, bb.y + bb.height},
+             .uv = {1.0F, 1.0F},
+             .color = color,
+             .mode = 0u});
+        batch.vertices.push_back({.position = {bb.x, bb.y + bb.height},
+                                  .uv = {0.0F, 1.0F},
+                                  .color = color,
+                                  .mode = 0u});
+        batch.indices.insert(batch.indices.end(), {base, base + 1, base + 2,
+                                                   base, base + 2, base + 3});
+        break;
+      }
+
+      case CLAY_RENDER_COMMAND_TYPE_TEXT: {
+        const auto &text = cmd.renderData.text;
+        const math::Vec4 color{
+            text.textColor.r / 255.0F,
+            text.textColor.g / 255.0F,
+            text.textColor.b / 255.0F,
+            text.textColor.a / 255.0F,
+        };
+        auto *font = ui_system.GetFont(text.fontId);
+        if (font == nullptr) {
+          break;
+        }
+        auto *atlas = font->GetAtlas(static_cast<i32>(text.fontSize));
+        if (atlas == nullptr) {
+          break;
+        }
+        float cursor_x = bb.x;
+        const float cursor_y = bb.y + atlas->ascent;
+        for (i32 ci = 0; ci < text.stringContents.length; ++ci) {
+          const auto cp = static_cast<i32>(
+              static_cast<unsigned char>(text.stringContents.chars[ci]));
+          auto it = atlas->glyphs.find(cp);
+          if (it == atlas->glyphs.end()) {
+            cursor_x += static_cast<float>(text.letterSpacing);
+            continue;
+          }
+          const GlyphInfo &g = it->second;
+
+          const float glyph_left = cursor_x + g.cursor_top_left_offset.x;
+          const float glyph_top = cursor_y + g.cursor_top_left_offset.y;
+          const float glyph_right = cursor_x + g.cursor_bottom_right_offset.x;
+          const float glyph_bottom = cursor_y + g.cursor_bottom_right_offset.y;
+
+          const auto base = static_cast<u32>(batch.vertices.size());
+
+          batch.vertices.push_back({.position = {glyph_left, glyph_top},
+                                    .uv = g.uv_top_left,
+                                    .color = color,
+                                    .mode = 1U});
+          batch.vertices.push_back(
+              {.position = {glyph_right, glyph_top},
+               .uv = {g.uv_bottom_right.x, g.uv_top_left.y},
+               .color = color,
+               .mode = 1U});
+          batch.vertices.push_back({.position = {glyph_right, glyph_bottom},
+                                    .uv = g.uv_bottom_right,
+                                    .color = color,
+                                    .mode = 1U});
+          batch.vertices.push_back(
+              {.position = {glyph_left, glyph_bottom},
+               .uv = {g.uv_top_left.x, g.uv_bottom_right.y},
+               .color = color,
+               .mode = 1U});
+
+          batch.indices.insert(batch.indices.end(), {base, base + 1, base + 2,
+                                                     base, base + 2, base + 3});
+          cursor_x += g.advance_x;
+          if (ci < text.stringContents.length - 1) {
+            cursor_x += static_cast<float>(text.letterSpacing);
+          }
+        }
+        break;
+      }
+
+      case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
+        flush_draw_call();
+        has_active_scissor = true;
+        current_scissor = VkRect2D{
+            .offset = {static_cast<i32>(bb.x), static_cast<i32>(bb.y)},
+            .extent = {static_cast<u32>(bb.width), static_cast<u32>(bb.height)},
+        };
+        break;
+      }
+
+      case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END: {
+        flush_draw_call();
+        has_active_scissor = false;
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+
+  flush_draw_call();
+}
 
 static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
   auto &world = core::LuminaEngine::Instance().GetCurrentWorld();
@@ -108,12 +264,40 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   auto &instance = GetStaticInstance();
   // TestJobSystem();
 
+  auto font = CreateFont("NaturalMono-Regular.ttf", std::span<const i32>({24}));
+  if (!font.has_value()) {
+    LOG_CRITICAL("Failed to create font: NaturalMono-Regular");
+    LUMINA_TERMINATE();
+  }
+  instance.fonts["NaturalMono-Regular"] = std::move(font.value());
+
   instance.window_dimensions = init_info.window_dimensions;
   instance.job_manager = std::make_unique<job_system::JobManager>();
   instance.job_manager->Initialize({.num_workers = 0, .fiber_pool_size = 1024});
   instance.renderer =
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
+  instance.ui_system = std::make_unique<UISystem>();
+  instance.ui_system->Initialize(init_info.window_dimensions.width,
+                                 init_info.window_dimensions.height);
+
+  // Create CPU-side Texture entries for all font atlases; GPU upload is
+  // deferred to the first ExecuteFrame via the texture upload loop.
+  u16 font_id = 0;
+  for (auto &[font_name, font] : instance.fonts) {
+    for (i32 size : {24}) {
+      if (auto *atlas = font.GetAtlas(size)) {
+        auto texture_handle = instance.texture_manager.Create(Texture{
+            .pixels = atlas->pixels,
+            .width = static_cast<u32>(atlas->width),
+            .height = static_cast<u32>(atlas->height),
+            .format = TextureFormat::R8_Unorm,
+        });
+        atlas->texture_handle = texture_handle;
+      }
+    }
+    instance.ui_system->RegisterFont(font_id++, &font);
+  }
 
   instance.camera_movement_controller =
       std::make_unique<CameraMovementController>(INVALID_ENTITY_ID);
@@ -227,8 +411,8 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
 
 auto LuminaEngine::Shutdown() -> void {
   auto &instance = GetStaticInstance();
+  instance.ui_system->Shutdown();
   instance.renderer->Shutdown();
-  instance.renderer->DeviceWaitIdle();
   instance.job_manager.reset();
   instance.renderer.reset();
   instance.current_world.reset();
@@ -237,6 +421,7 @@ auto LuminaEngine::Shutdown() -> void {
 
 auto LuminaEngine::BeginFrame(Timer &timer) -> void {
   renderer->AcquireFrameContextForUpdate();
+  ui_system->BeginLayout(window_dimensions.width, window_dimensions.height);
   auto delta_time = timer.Tick();
   // Clamp the delta time to 0.1 seconds to prevent large jumps in time
   delta_time = math::Clamp(delta_time, 0.0, 0.1);
@@ -246,6 +431,7 @@ auto LuminaEngine::BeginFrame(Timer &timer) -> void {
 
 auto LuminaEngine::ProcessDeferredOperations() -> void {
   static_mesh_manager.ProcessDeferredOperations();
+  texture_manager.ProcessDeferredOperations();
 }
 
 auto LuminaEngine::EndFrame() -> void {
@@ -295,6 +481,31 @@ auto LuminaEngine::ExecuteFrame() -> void {
         job_manager->SubmitJob(job);
       });
 
+  std::unordered_set<ResourceHandleIndexType> dispatched_texture_uploads;
+  texture_manager.ForEach([this, &dispatched_texture_uploads](
+                              TextureHandle handle, Texture &texture) -> void {
+    if (dispatched_texture_uploads.contains(handle.index)) {
+      return;
+    }
+    if (texture.render_active) {
+      return;
+    }
+    dispatched_texture_uploads.insert(handle.index);
+    texture_manager.Update(handle,
+                           [](Texture &t) -> void { t.render_active = true; });
+    auto *job = job_manager->AcquireJob();
+    job->execute = [handle](void *data) -> void {
+      auto *engine = static_cast<LuminaEngine *>(data);
+      auto t_opt = engine->texture_manager.Get(handle);
+      ASSERT(t_opt.has_value(), "Texture not found during GPU upload");
+      auto rth = engine->renderer->CreateRenderTexture(*t_opt.value());
+      engine->texture_manager.Update(
+          handle, [rth](Texture &t) -> void { t.render_texture_handle = rth; });
+    };
+    job->data = this;
+    job_manager->SubmitJob(job);
+  });
+
   auto *frame_sync_counter = job_manager->AllocateCounter(2);
   auto *job = job_manager->AcquireJob();
   job->execute = [](void *data) {
@@ -340,6 +551,21 @@ auto LuminaEngine::ExecuteFrame() -> void {
   input_dispatcher.Dispatch(input_state);
   job_manager->WaitForCounter(frame_sync_counter);
   job_manager->ReleaseCounter(frame_sync_counter);
+
+  CLAY({.id = CLAY_ID("HelloWorld"),
+        .floating = {
+            .offset = {10.0F, 10.0F},
+            .attachTo = CLAY_ATTACH_TO_ROOT,
+        }}) {
+    CLAY_TEXT(
+        CLAY_STRING("Hello World!"),
+        CLAY_TEXT_CONFIG(
+            {.textColor = {255, 255, 255, 255}, .fontId = 0, .fontSize = 24}));
+  }
+
+  auto clay_commands = ui_system->EndLayout();
+  auto *frame_context = renderer->GetFrameContextForUpdate();
+  BuildUIBatch(clay_commands, *ui_system, frame_context->ui_batch);
 }
 
 } // namespace lumina::core

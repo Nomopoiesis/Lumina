@@ -9,10 +9,13 @@
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
 #include "shaders/shader_interface.hpp"
+#include "ui_renderer.hpp"
 #include "vulkan_context.hpp"
 
 #include "core/static_mesh.hpp"
+#include "core/texture.hpp"
 #include "render_mesh.hpp"
+#include "render_texture.hpp"
 
 #include "common/data_structures/lock_free_concurrent_queue.hpp"
 #include "common/data_structures/lock_free_object_pool.hpp"
@@ -25,6 +28,7 @@ namespace lumina::renderer {
 
 using GraphicsPipelineManager = core::ResourceManager<GraphicsPipeline>;
 using RenderMeshManager = core::ResourceManager<RenderMesh>;
+using RenderTextureManager = core::ResourceManager<RenderTexture>;
 using MaterialTemplateManager = core::ResourceManager<MaterialTemplate>;
 using MaterialInstanceManager = core::ResourceManager<MaterialInstance>;
 
@@ -49,6 +53,8 @@ public:
   auto Initialize() -> void;
 
   auto DrawFrame() -> void;
+  auto DrawUI(FrameContext &frame_context, VkCommandBuffer command_buffer,
+              u32 image_index) -> void;
 
   auto Shutdown() -> void;
 
@@ -98,6 +104,11 @@ public:
                         GraphicsPipelineHandle pipeline_handle)
       -> RenderMeshHandle;
   auto DestroyRenderMesh(RenderMeshHandle handle) -> void;
+
+  auto CreateRenderTexture(const core::Texture &texture) -> RenderTextureHandle;
+  auto DestroyRenderTexture(RenderTextureHandle handle) -> void;
+  [[nodiscard]] auto GetRenderTexture(RenderTextureHandle handle) noexcept
+      -> std::optional<const RenderTexture *>;
 
   [[nodiscard]] auto GetDefaultMaterialInstanceHandle() const noexcept
       -> MaterialInstanceHandle {
@@ -154,6 +165,7 @@ private:
   auto PollAndExecuteCommandContexts() -> void;
 
   auto RecordCommandBuffer(FrameContext &frame_context,
+                           VkCommandBuffer command_buffer,
                            u32 image_index) noexcept
       -> std::expected<void, VkInitializationError>;
 
@@ -217,7 +229,10 @@ private:
   MaterialInstanceHandle default_material_instance_handle;
   GraphicsPipelineHandle default_pipeline_handle;
 
+  UIRenderer ui_renderer;
+
   RenderMeshManager render_mesh_manager;
+  RenderTextureManager render_texture_manager;
   MaterialTemplateManager material_template_manager;
   MaterialInstanceManager material_instance_manager;
   GraphicsPipelineManager pipeline_manager;
@@ -234,6 +249,9 @@ private:
   friend auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
       -> std::expected<void, VkInitializationError>;
   friend auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void;
+  friend auto UpdateDefaultMaterialTexture(LuminaRenderer *renderer,
+                                           VkSampler sampler,
+                                           VkImageView image_view) -> void;
   friend auto WriteTransientDescriptors(LuminaRenderer *renderer,
                                         FrameContext &frame_context,
                                         VkDescriptorSet descriptor_set) -> void;

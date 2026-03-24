@@ -6,6 +6,7 @@
 #include "material_instance_handle.hpp"
 #include "math/matrix.hpp"
 #include "render_mesh.hpp"
+#include "ui_types.hpp"
 #include "vulkan_context.hpp"
 
 #include <memory>
@@ -114,6 +115,7 @@ public:
   }
 
   std::vector<DrawMeshInfo> render_draw_list;
+  UIRenderBatch ui_batch;
 
 private:
   VulkanContext &vulkan_context;
