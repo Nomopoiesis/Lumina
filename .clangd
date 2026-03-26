@@ -1,13 +1,7 @@
 CompileFlags:
   CompilationDatabase: build/Debug
-  Compiler: "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang-cl.exe"
   Add: 
     - -std=c++23
-    - -fms-compatibility
-    - -fms-extensions
-    - -DWIN32
-    - -D_WINDOWS
-    - -D_CRT_SECURE_NO_WARNINGS
   Remove: [-W*]
 
 Index:

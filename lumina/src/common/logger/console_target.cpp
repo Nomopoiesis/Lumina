@@ -1,6 +1,10 @@
 #include "console_target.hpp"
 
+#include "platform/platform_common/file_handle.hpp"
+
 namespace lumina::common::logger {
+
+using lumina::platform::common::InvalidFileHandle;
 
 namespace {
 
@@ -31,7 +35,7 @@ constexpr auto GetAnsiCodeForLevel(LogLevel level) -> const char * {
 ConsoleTarget::ConsoleTarget(
     lumina::platform::common::PlatformServices &platform_services,
     const bool enable_colors)
-    : platform_services_(platform_services), console_handle_(nullptr),
+    : platform_services_(platform_services), console_handle_(InvalidFileHandle),
       enable_colors_(enable_colors) {
   // Create/attach to console using platform services
   if (platform_services_.LuminaCreateConsole != nullptr) {
@@ -40,7 +44,7 @@ ConsoleTarget::ConsoleTarget(
 }
 
 auto ConsoleTarget::Write(LogLevel level, const std::string &message) -> void {
-  if (console_handle_ == nullptr ||
+  if (console_handle_ == InvalidFileHandle ||
       platform_services_.LuminaWriteConsole == nullptr) {
     return;
   }
@@ -82,7 +86,7 @@ auto ConsoleTarget::OnShutdown(bool wait_for_keypress) -> void {
     return;
   }
 
-  if (console_handle_ == nullptr ||
+  if (console_handle_ == InvalidFileHandle ||
       platform_services_.LuminaWriteConsole == nullptr) {
     return;
   }

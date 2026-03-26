@@ -4,11 +4,14 @@
 #include "lumina_util.hpp"
 
 #include <atomic>
+#include <cmath>
+#include <cstring>
 #include <vector>
 
 namespace lumina::common::data_structures {
 
-template <typename T> class WorkStealingDeque {
+template <typename T>
+class WorkStealingDeque {
 public:
   WorkStealingDeque() noexcept {
     top_index.store(0, std::memory_order_relaxed);
@@ -37,7 +40,8 @@ public:
   auto Steal(T &value) -> bool;
 
 private:
-  template <typename TYPE> struct InternalBuffer {
+  template <typename TYPE>
+  struct InternalBuffer {
     size_t capacity;
     size_t capacity_mask;
     std::unique_ptr<std::atomic<TYPE>[]> data;
@@ -64,7 +68,8 @@ private:
   std::vector<InternalBuffer<T> *> garbage_list{};
 };
 
-template <typename T> auto WorkStealingDeque<T>::Grow() -> bool {
+template <typename T>
+auto WorkStealingDeque<T>::Grow() -> bool {
   auto *old_storage = storage.load(std::memory_order_relaxed);
   size_t old_scale = std::log2(old_storage->capacity);
   if (old_scale >= MAX_CAPACITY_SCALE) {
@@ -86,7 +91,8 @@ template <typename T> auto WorkStealingDeque<T>::Grow() -> bool {
   return true;
 }
 
-template <typename T> auto WorkStealingDeque<T>::Push(const T &value) -> bool {
+template <typename T>
+auto WorkStealingDeque<T>::Push(const T &value) -> bool {
   size_t bottom_index_value = bottom_index.load(std::memory_order_relaxed);
   size_t top_index_value = top_index.load(std::memory_order_acquire);
 
@@ -105,7 +111,8 @@ template <typename T> auto WorkStealingDeque<T>::Push(const T &value) -> bool {
   return true;
 }
 
-template <typename T> auto WorkStealingDeque<T>::Pop(T &value) -> bool {
+template <typename T>
+auto WorkStealingDeque<T>::Pop(T &value) -> bool {
   size_t bottom_index_value = bottom_index.load(std::memory_order_relaxed);
   if (bottom_index_value == 0) {
     // Queue is empty - early out to avoid underflow
@@ -142,7 +149,8 @@ template <typename T> auto WorkStealingDeque<T>::Pop(T &value) -> bool {
   return result;
 }
 
-template <typename T> auto WorkStealingDeque<T>::Steal(T &value) -> bool {
+template <typename T>
+auto WorkStealingDeque<T>::Steal(T &value) -> bool {
   auto top_index_value = top_index.load(std::memory_order_acquire);
   std::atomic_thread_fence(std::memory_order_seq_cst);
   auto bottom_index_value = bottom_index.load(std::memory_order_acquire);

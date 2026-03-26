@@ -1,12 +1,15 @@
 #pragma once
 
 #include "log_target.hpp"
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/file_handle.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include <mutex>
 #include <string>
 
 namespace lumina::common::logger {
+
+using lumina::platform::common::InvalidFileHandle;
 
 // Console log target implementation
 // Writes log messages to the console using platform-specific console operations
@@ -36,9 +39,13 @@ public:
   // stays open long enough to inspect log output.
   auto OnShutdown(bool wait_for_keypress) -> void override;
 
+  [[nodiscard]] auto IsValid() const -> bool override {
+    return console_handle_ != InvalidFileHandle;
+  }
+
 private:
   lumina::platform::common::PlatformServices &platform_services_;
-  void *console_handle_;
+  lumina::platform::common::FileHandle console_handle_;
   bool enable_colors_{true};
   std::mutex write_mutex_;
 };

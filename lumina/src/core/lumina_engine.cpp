@@ -1,7 +1,12 @@
 #include "lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
+<<<<<<< Updated upstream
 #include "standard_lit.vert.gen.hpp"
+=======
+#include "common/path_registry.hpp"
+#include "platform/platform_common/file_handle.hpp"
+>>>>>>> Stashed changes
 
 #include "basic_geometry.hpp"
 #include "components/camera.hpp"
@@ -11,6 +16,8 @@
 #include "math/basic.hpp"
 
 namespace lumina::core {
+
+using lumina::platform::common::InvalidFileHandle;
 
 using namespace lumina::core::components;
 
@@ -85,6 +92,71 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   instance.input_dispatcher.RegisterHandler(
       instance.camera_movement_controller.get(), 10);
 
+<<<<<<< Updated upstream
+=======
+  constexpr std::string_view kModelCacheKey = "suzanne";
+  const auto &model_cache =
+      lumina::common::PathRegistry::Instance().model_cache;
+
+  StaticMesh static_mesh;
+  if (HasCachedMesh(kModelCacheKey, model_cache)) {
+    LOG_INFO("Loading mesh from cache: suzanne");
+    auto result = DeserializeStaticMesh(kModelCacheKey, model_cache);
+    if (!result.has_value()) {
+      LOG_CRITICAL("Failed to deserialize cached mesh: %s",
+                   result.error().message);
+      LUMINA_TERMINATE();
+    }
+    static_mesh = std::move(*result);
+  } else {
+    LOG_INFO("Parsing OBJ: suzanne");
+    auto file_handle =
+        platform::common::PlatformServices::Instance().LuminaOpenFile(
+            lumina::common::PathRegistry::Instance()
+                .models.Resolve("suzanne.obj")
+                .string()
+                .c_str());
+    std::size_t file_size =
+        platform::common::PlatformServices::Instance().LuminaGetFileSize(
+            file_handle);
+    common::data_structures::DataBuffer data_buffer(file_size);
+    platform::common::PlatformServices::Instance().LuminaReadFile(
+        file_handle, data_buffer.Data(), file_size);
+    platform::common::PlatformServices::Instance().LuminaCloseFile(file_handle);
+    auto obj_data = data_parsers::ParseOBJ(data_buffer.View());
+    static_mesh.vertex_count = obj_data.vertex_count;
+    static_mesh.vertex_attributes.emplace_back(
+        VertexAttribute{.type = VertexAttributeType::Position,
+                        .element_type = ElementType::Vec3},
+        std::vector<u8>(reinterpret_cast<u8 *>(obj_data.positions.data()),
+                        reinterpret_cast<u8 *>(obj_data.positions.data() +
+                                               obj_data.positions.size())));
+    static_mesh.vertex_attributes.emplace_back(
+        VertexAttribute{.type = VertexAttributeType::Normal,
+                        .element_type = ElementType::Vec3},
+        std::vector<u8>(reinterpret_cast<u8 *>(obj_data.normals.data()),
+                        reinterpret_cast<u8 *>(obj_data.normals.data() +
+                                               obj_data.normals.size())));
+    static_mesh.vertex_attributes.emplace_back(
+        VertexAttribute{.type = VertexAttributeType::TexCoord,
+                        .element_type = ElementType::Vec2},
+        std::vector<u8>(reinterpret_cast<u8 *>(obj_data.tex_coords.data()),
+                        reinterpret_cast<u8 *>(obj_data.tex_coords.data() +
+                                               obj_data.tex_coords.size())));
+    static_mesh.indices = obj_data.indices;
+
+    auto cache_result =
+        SerializeStaticMesh(static_mesh, kModelCacheKey, model_cache);
+    if (!cache_result.has_value()) {
+      LOG_WARNING("Failed to write mesh cache: %s",
+                  cache_result.error().message);
+    }
+  }
+
+  auto static_mesh_handle =
+      instance.static_mesh_manager.Create(std::move(static_mesh));
+
+>>>>>>> Stashed changes
   // Create the default world (scene)
   instance.current_world = std::make_unique<World>();
   auto &world = *instance.current_world;

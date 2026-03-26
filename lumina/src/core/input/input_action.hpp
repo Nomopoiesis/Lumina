@@ -7,13 +7,18 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace lumina::core {
 
 struct ActionID {
   u64 id;
+<<<<<<< Updated upstream
   consteval ActionID(const char *name) noexcept
       : id(std::hash<std::string_view>{}(name)) {}
+=======
+  consteval ActionID(const char *name) noexcept : id(HashString(name)) {}
+>>>>>>> Stashed changes
 
   explicit constexpr ActionID(std::string_view name) noexcept
       : id(std::hash<std::string_view>{}(name)) {}

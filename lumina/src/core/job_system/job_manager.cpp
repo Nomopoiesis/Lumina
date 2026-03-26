@@ -6,7 +6,7 @@
 #include "common/lumina_util.hpp"
 #include "lumina_assert.hpp"
 #include "lumina_types.hpp"
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include <thread>
 
@@ -209,9 +209,9 @@ auto JobManager::SubmitJob(Job *job) -> void {
   }
 
   // We are an external thread (main, render, etc.). Push to a worker's external
-  // job queue via round-robin. The external queue is safe for multiple producers
-  // and will be drained into the worker's work-stealing deque, making the job
-  // stealable by other workers.
+  // job queue via round-robin. The external queue is safe for multiple
+  // producers and will be drained into the worker's work-stealing deque, making
+  // the job stealable by other workers.
   auto worker_index =
       round_robin_index.fetch_add(1, std::memory_order_relaxed) %
       worker_contexts.size();

@@ -9,7 +9,12 @@
 
 #include "common/logger/logger.hpp"
 #include "common/timer.hpp"
+<<<<<<< Updated upstream
 #include "platform/common/platform_services.hpp"
+=======
+#include "platform/platform_common/platform_services.hpp"
+#include "platform/platform_common/runtime_root.hpp"
+>>>>>>> Stashed changes
 #include "win_platform_services.hpp"
 
 auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
