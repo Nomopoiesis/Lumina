@@ -3,7 +3,7 @@
 namespace lumina::platform::windows {
 
 // Initializes the PlatformServices singleton with Windows-specific
-// implementations for all file and console operations
+// implementations
 auto InitPlatformServices() -> void;
 
 } // namespace lumina::platform::windows

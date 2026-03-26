@@ -1,29 +1,21 @@
-#include <Windows.h>
-#include <timeapi.h> // timeBeginPeriod / timeEndPeriod
+#include "linux_window.hpp"
 
-#include "scope_guard.hpp"
-#include "vulkan/win_vulkan.hpp"
-#include "win_window.hpp"
-
-#include "core/lumina_engine.hpp"
+#include "vulkan/linux_vulkan.hpp"
 
 #include "common/logger/logger.hpp"
 #include "common/path_registry.hpp"
+#include "common/scope_guard.hpp"
 #include "common/timer.hpp"
+#include "linux_platform_services.hpp"
 #include "platform/platform_common/platform_services.hpp"
 #include "platform/platform_common/runtime_root.hpp"
-#include "win_platform_services.hpp"
 
-auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-                    LPSTR lpCmdLine, int nShowCmd) -> int {
-  using namespace lumina::platform::windows;
+#include "core/lumina_engine.hpp"
+
+auto main() -> int {
+  using namespace lumina::platform::llinux;
   using namespace lumina::common;
   using namespace lumina::platform;
-
-  // Set timer resolution to 1ms for better sleep precision
-  timeBeginPeriod(1);
-  // Restore timer resolution on exit
-  ScopeGuard time_period_guard([]() { timeEndPeriod(1); });
 
   // Initialize platform services before using them
   InitPlatformServices();
@@ -44,7 +36,7 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   LOG_INFO("Logger initialized - Welcome to Lumina!");
 
   LOG_TRACE("Creating window...");
-  auto window_result = Window::Create(hInstance, "Lumina", 800, 600);
+  auto window_result = Window::Create("Lumina");
   if (!window_result) {
     LOG_ERROR("Failed to create window: {}", window_result.error().message);
     return 1;
@@ -55,8 +47,8 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     Window::Destroy();
   });
 
-  LOG_TRACE("Initializing Vulkan Windows Platform...");
-  auto vulkan_init_result = windows::vulkan::InitializeVulkan(window);
+  LOG_TRACE("Initializing Vulkan Linux Platform...");
+  auto vulkan_init_result = llinux::vulkan::InitializeVulkan(window);
   if (!vulkan_init_result) {
     LOG_ERROR("Initailization failure: {}", vulkan_init_result.error().message);
     return 1;
@@ -64,7 +56,7 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   auto &vulkan_init_res = vulkan_init_result.value();
   ScopeGuard vulkan_guard([&vulkan_init_res]() -> void {
-    LOG_TRACE("Destroying Vulkan Windows Platform...");
+    LOG_TRACE("Destroying Vulkan Linux Platform...");
     vulkan::DestroyVulkan(vulkan_init_res);
   }); // Destroy vulkan on exit
 

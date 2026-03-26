@@ -1,11 +1,16 @@
 #include "file_target.hpp"
 
+#include "platform/platform_common/file_handle.hpp"
+
 namespace lumina::common::logger {
+
+using lumina::platform::common::InvalidFileHandle;
 
 FileTarget::FileTarget(
     lumina::platform::common::PlatformServices &platform_services,
     const std::string &file_path)
-    : platform_services_(platform_services), file_handle_(nullptr) {
+    : platform_services_(platform_services),
+      file_handle_(lumina::platform::common::InvalidFileHandle) {
   // Open file in append mode using platform services
   if (platform_services_.LuminaCreateFile != nullptr) {
     file_handle_ = platform_services_.LuminaCreateFile(file_path.c_str());
@@ -14,16 +19,16 @@ FileTarget::FileTarget(
 
 FileTarget::~FileTarget() {
   // Close file handle if it's valid
-  if (file_handle_ != nullptr &&
+  if (file_handle_ != InvalidFileHandle &&
       platform_services_.LuminaCloseFile != nullptr) {
     platform_services_.LuminaCloseFile(file_handle_);
-    file_handle_ = nullptr;
+    file_handle_ = InvalidFileHandle;
   }
 }
 
 auto FileTarget::Write([[maybe_unused]] LogLevel level,
                        const std::string &message) -> void {
-  if (file_handle_ == nullptr ||
+  if (file_handle_ == InvalidFileHandle ||
       platform_services_.LuminaWriteFile == nullptr) {
     return;
   }

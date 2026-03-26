@@ -1,7 +1,7 @@
 #pragma once
 
 #include "material_template.hpp"
-#include "platform/common/vulkan/vulkan_init_result.hpp"
+#include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "command_context.hpp"
 #include "frame_context.hpp"

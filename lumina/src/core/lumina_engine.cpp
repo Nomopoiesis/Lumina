@@ -5,6 +5,7 @@
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
 #include "common/path_registry.hpp"
+#include "platform/platform_common/file_handle.hpp"
 
 #include "basic_geometry.hpp"
 #include "components/camera.hpp"
@@ -18,6 +19,8 @@
 #include "mesh_cache.hpp"
 
 namespace lumina::core {
+
+using lumina::platform::common::InvalidFileHandle;
 
 using namespace lumina::core::components;
 
@@ -43,6 +46,7 @@ static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
             .attenuation_radius = component.attenation_radius,
         };
       });
+
   memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
   return true;
 }
@@ -138,12 +142,13 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
     static_mesh = std::move(*result);
   } else {
     LOG_INFO("Parsing OBJ: suzanne");
-    void *file_handle =
+    auto file_handle =
         platform::common::PlatformServices::Instance().LuminaOpenFile(
             lumina::common::PathRegistry::Instance()
                 .models.Resolve("suzanne.obj")
                 .string()
                 .c_str());
+    ASSERT(file_handle != InvalidFileHandle, "Failed to open model file");
     std::size_t file_size =
         platform::common::PlatformServices::Instance().LuminaGetFileSize(
             file_handle);

@@ -8,11 +8,22 @@ from pathlib import Path
 # Compiles the interface GLSL to SPIR-V, reflects it, and outputs a .hpp
 # to interfaces/headers/
 
-GLSLC_PATH = os.environ.get("GLSLC_PATH", r"C:\VulkanSDK\1.4.341.1\Bin\glslc.exe")
-REFLECT_PATH = os.environ.get("SPIRV_REFLECT_PATH", r"build\Debug\bin\spirv_reflect_tool.exe")
-CLANG_FORMAT_PATH = os.environ.get("CLANG_FORMAT_PATH", r"C:\Program Files\LLVM\bin\clang-format.exe")
+_WIN = sys.platform == "win32"
 
-IFACE_DIR = Path("lumina/data/shaders/interfaces")
+GLSLC_PATH = os.environ.get(
+    "GLSLC_PATH",
+    r"C:\VulkanSDK\1.4.341.1\Bin\glslc.exe" if _WIN else "glslc",
+)
+REFLECT_PATH = os.environ.get(
+    "SPIRV_REFLECT_PATH",
+    r"build\Debug\bin\spirv_reflect_tool.exe" if _WIN else "build/Debug/bin/spirv_reflect_tool",
+)
+CLANG_FORMAT_PATH = os.environ.get(
+    "CLANG_FORMAT_PATH",
+    r"C:\Program Files\LLVM\bin\clang-format.exe" if _WIN else "clang-format",
+)
+
+IFACE_DIR = Path("lumina/data/static/shaders/interfaces")
 OUT_DIR = IFACE_DIR / "headers"
 
 STAGE_MAP = {

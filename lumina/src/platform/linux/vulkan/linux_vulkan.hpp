@@ -1,15 +1,10 @@
 #pragma once
 
-#include <expected>
-#include <string>
-
-#include "win_window.hpp"
-
-#define
+#include "linux_window.hpp"
 
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
-namespace lumina::platform::windows::vulkan {
+namespace lumina::platform::llinux::vulkan {
 
 struct VkInitializationError {
   std::string message;
@@ -23,4 +18,4 @@ auto DestroyVulkan(
     common::vulkan::VkInitializationResult &vulkan_init_result) noexcept
     -> void;
 
-} // namespace lumina::platform::windows::vulkan
+} // namespace lumina::platform::llinux::vulkan

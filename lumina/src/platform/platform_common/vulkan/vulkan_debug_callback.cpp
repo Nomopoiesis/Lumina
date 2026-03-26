@@ -13,7 +13,10 @@ auto VulkanDebugCallback(
     -> VkBool32 {
   switch (messageSeverity) {
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-      LOG_INFO("Validation layer: {}", pCallbackData->pMessage);
+      LOG_TRACE("Validation layer: {}", pCallbackData->pMessage);
+      break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+      LOG_DEBUG("Validation layer: {}", pCallbackData->pMessage);
       break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
       LOG_WARNING("Validation layer: {}", pCallbackData->pMessage);
@@ -22,7 +25,7 @@ auto VulkanDebugCallback(
       LOG_ERROR("Validation layer: {}", pCallbackData->pMessage);
       break;
     default:
-      LOG_INFO("Validation layer: {}", pCallbackData->pMessage);
+      LOG_DEBUG("Validation layer: {}", pCallbackData->pMessage);
       break;
   }
   return VK_FALSE;
@@ -36,6 +39,7 @@ auto CreateVulkanDebugMessenger(VkInstance instance) noexcept
       .pNext = nullptr,
       .flags = 0,
       .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT    |
                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
       .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |

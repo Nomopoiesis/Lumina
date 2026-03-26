@@ -1,19 +1,21 @@
-#include "win_vulkan.hpp"
+#include "linux_vulkan.hpp"
 
-#include "win_vulkan_instance.hpp"
-#include "win_vulkan_surface.hpp"
+#include "linux_vulkan_surface.hpp"
+#include "platform/platform_common/vulkan/vulkan_debug_callback.hpp"
+#include "platform/platform_common/vulkan/vulkan_instance.hpp"
 
-#include "common/vulkan/vulkan_debug_callback.hpp"
+#include <vulkan/vulkan.h>
 
-#include <vulkan/vk_enum_string_helper.h>
+namespace lumina::platform::llinux::vulkan {
 
-namespace lumina::platform::windows::vulkan {
+using namespace common::vulkan;
 
 auto InitializeVulkan(Window &window) noexcept
     -> std::expected<common::vulkan::VkInitializationResult,
                      VkInitializationError> {
+
   std::string error_message;
-  VulkanInstanceCreateInfo create_info{
+  common::vulkan::VulkanInstanceCreateInfo create_info{
       .application_name = "Lumina",
       .application_version_major = 1,
       .application_version_minor = 0,
@@ -21,7 +23,7 @@ auto InitializeVulkan(Window &window) noexcept
       .required_extensions =
           {
               VK_KHR_SURFACE_EXTENSION_NAME,
-              VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+              VK_KHR_XCB_SURFACE_EXTENSION_NAME,
           },
   };
   auto instance_result = CreateVulkanInstance(create_info);
@@ -40,9 +42,9 @@ auto InitializeVulkan(Window &window) noexcept
     }
 #endif
 
-    auto surface_result =
-        CreateVulkanSurface(instance_result.value(), window.GetWindowHandle(),
-                            window.GetHInstance());
+    auto surface_result = CreateVulkanSurface(instance_result.value(),
+                                              window.GetXCBWindowHandle(),
+                                              window.GetXCBConnection());
     if (surface_result) {
       return common::vulkan::VkInitializationResult{
           .instance = instance_result.value(),
@@ -71,4 +73,4 @@ auto DestroyVulkan(
   DestroyVulkanInstance(vulkan_init_result.instance);
 }
 
-} // namespace lumina::platform::windows::vulkan
+} // namespace lumina::platform::llinux::vulkan

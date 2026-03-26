@@ -18,8 +18,10 @@
 #ifdef NDEBUG
 #define LUMINA_DEBUG_BREAK() ((void)0)
 #else
-#if defined(_MSC_VER) || defined(__clang__)
+#if defined(_MSC_VER)
 #define LUMINA_DEBUG_BREAK() __debugbreak()
+#elif defined(__clang__)
+#define LUMINA_DEBUG_BREAK() __builtin_debugtrap()
 #elif defined(__GNUC__)
 #define LUMINA_DEBUG_BREAK() __builtin_trap()
 #else

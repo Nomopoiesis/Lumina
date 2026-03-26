@@ -2,12 +2,16 @@
 
 #include "common/data_structures/data_buffer.hpp"
 #include "common/logger/logger.hpp"
+#include "platform/platform_common/file_handle.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 namespace lumina::core {
+
+using lumina::platform::common::FileHandle;
+using lumina::platform::common::InvalidFileHandle;
 
 // Binary format (little-endian):
 //   [4]  magic: 'L','M','S','H'
@@ -49,10 +53,10 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
     return std::unexpected(MeshCacheError{"failed to create cache directory"});
   }
 
-  auto *file_handle =
+  auto file_handle =
       platform::common::PlatformServices::Instance().LuminaCreateFile(
           path.string().c_str());
-  if (file_handle == nullptr) {
+  if (file_handle == InvalidFileHandle) {
     LOG_ERROR("mesh_cache: failed to open file for writing: %s",
               path.string().c_str());
     return std::unexpected(
@@ -110,10 +114,10 @@ auto DeserializeStaticMesh(std::string_view cache_key,
     -> std::expected<StaticMesh, MeshCacheError> {
   const auto path = CachePath(cache_key, cache_resolver);
 
-  auto *file_handle =
+  auto file_handle =
       platform::common::PlatformServices::Instance().LuminaOpenFile(
           path.string().c_str());
-  if (file_handle == nullptr) {
+  if (file_handle == InvalidFileHandle) {
     LOG_ERROR("mesh_cache: failed to open cache file: %s",
               path.string().c_str());
     return std::unexpected(MeshCacheError{"failed to open cache file"});

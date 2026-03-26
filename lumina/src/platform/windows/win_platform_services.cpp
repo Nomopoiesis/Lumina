@@ -3,23 +3,26 @@
 #include <Windows.h>
 
 #include "common/logger/logger.hpp"
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/file_handle.hpp"
+#include "platform/platform_common/platform_services.hpp"
 #include "win_window.hpp"
 #include <Shlwapi.h>
 #include <conio.h>
 #include <cstddef>
 #include <wchar.h>
 
-
 namespace lumina::platform::windows {
 
 namespace {
 
+using lumina::platform::common::FileHandle;
+using lumina::platform::common::InvalidFileHandle;
+
 // Windows-specific implementation functions
 
-auto WinCreateFile(const char *path) -> void * {
+auto WinCreateFile(const char *path) -> FileHandle {
   if (path == nullptr) {
-    return nullptr;
+    return InvalidFileHandle;
   }
 
   // Open file in append mode, create if it doesn't exist
@@ -28,13 +31,13 @@ auto WinCreateFile(const char *path) -> void * {
                   nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 
   if (handle == INVALID_HANDLE_VALUE) {
-    return nullptr;
+    return InvalidFileHandle;
   }
 
   // Move to end of file for append mode
   SetFilePointer(handle, 0, nullptr, FILE_END);
 
-  return static_cast<void *>(handle);
+  return static_cast<FileHandle>(handle);
 }
 
 auto WinCreateDirectory(const char *path) -> bool {
@@ -47,9 +50,9 @@ auto WinCreateDirectory(const char *path) -> bool {
   return CreateDirectoryA(path, nullptr) != FALSE;
 }
 
-auto WinOpenFile(const char *path) -> void * {
+auto WinOpenFile(const char *path) -> FileHandle {
   if (path == nullptr) {
-    return nullptr;
+    return InvalidFileHandle;
   }
 
   HANDLE handle =
@@ -57,18 +60,18 @@ auto WinOpenFile(const char *path) -> void * {
                   nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 
   if (handle == INVALID_HANDLE_VALUE) {
-    return nullptr;
+    return InvalidFileHandle;
   }
 
-  return static_cast<void *>(handle);
+  return static_cast<FileHandle>(handle);
 }
 
-auto WinGetFileSize(void *handle) -> std::size_t {
+auto WinGetFileSize(FileHandle handle) -> std::size_t {
   if (handle == nullptr) {
     return 0;
   }
 
-  HANDLE file_handle = static_cast<HANDLE>(handle); // NOLINT
+  HANDLE file_handle = reinterpret_cast<HANDLE>(handle); // NOLINT
   LARGE_INTEGER size;
   if (GetFileSizeEx(file_handle, &size) == FALSE) {
     return 0;
@@ -76,12 +79,13 @@ auto WinGetFileSize(void *handle) -> std::size_t {
   return static_cast<std::size_t>(size.QuadPart);
 }
 
-auto WinWriteFile(void *handle, const void *data, std::size_t size) -> bool {
-  if (handle == nullptr || data == nullptr || size == 0) {
+auto WinWriteFile(FileHandle handle, const void *data, std::size_t size)
+    -> bool {
+  if (handle == InvalidFileHandle || data == nullptr || size == 0) {
     return false;
   }
 
-  HANDLE file_handle = static_cast<HANDLE>(handle); // NOLINT
+  HANDLE file_handle = reinterpret_cast<HANDLE>(handle); // NOLINT
   DWORD bytes_written = 0;
 
   BOOL result = ::WriteFile(file_handle, data, static_cast<DWORD>(size),
@@ -90,27 +94,27 @@ auto WinWriteFile(void *handle, const void *data, std::size_t size) -> bool {
   return result != FALSE && bytes_written == static_cast<DWORD>(size);
 }
 
-auto WinReadFile(void *handle, void *data, std::size_t size) -> bool {
-  if (handle == nullptr || data == nullptr) {
+auto WinReadFile(FileHandle handle, void *data, std::size_t size) -> bool {
+  if (handle == InvalidFileHandle || data == nullptr) {
     return false;
   }
 
   // If file size is 0 read the whole file
   if (size == 0) {
     LARGE_INTEGER win_size;
-    if (GetFileSizeEx(static_cast<HANDLE>(handle), &win_size) == FALSE) {
+    if (GetFileSizeEx(reinterpret_cast<HANDLE>(handle), &win_size) == FALSE) {
       return false;
     }
     size = SafeI64ToU64(win_size.QuadPart);
   }
 
-  return ReadFile(static_cast<HANDLE>(handle), data, static_cast<DWORD>(size),
-                  nullptr, nullptr) != FALSE;
+  return ReadFile(reinterpret_cast<HANDLE>(handle), data,
+                  static_cast<DWORD>(size), nullptr, nullptr) != FALSE;
 }
 
-auto WinCloseFile(void *handle) -> void {
-  if (handle != nullptr) {
-    CloseHandle(static_cast<HANDLE>(handle));
+auto WinCloseFile(FileHandle handle) -> void {
+  if (handle != InvalidFileHandle) {
+    CloseHandle(reinterpret_cast<HANDLE>(handle));
   }
 }
 
@@ -154,13 +158,13 @@ auto WinCreateConsole() -> void * {
   return GetStdHandle(STD_OUTPUT_HANDLE);
 }
 
-auto WinWriteConsole(void *handle, const char *text, std::size_t length)
+auto WinWriteConsole(FileHandle handle, const char *text, std::size_t length)
     -> void {
-  if (handle == nullptr || text == nullptr || length == 0) {
+  if (handle == InvalidFileHandle || text == nullptr || length == 0) {
     return;
   }
 
-  HANDLE console_handle = static_cast<HANDLE>(handle); // NOLINT
+  HANDLE console_handle = reinterpret_cast<HANDLE>(handle); // NOLINT
   DWORD bytes_written = 0;
 
   // Try WriteConsoleA first (works for console handles)
@@ -229,6 +233,10 @@ auto WinSwitchToFiber(void *from_fiber [[maybe_unused]], void *to_fiber)
   SwitchToFiber(to_fiber);
 }
 
+auto WinDestroyFiber(void *fiber) -> void {
+  DeleteFiber(fiber);
+}
+
 auto WinSetCursorPosition(f32 x, f32 y) -> void {
   POINT point = {static_cast<int>(x), static_cast<int>(y)};
   auto *window = Window::Instance().GetWindowHandle();
@@ -259,7 +267,7 @@ auto InitPlatformServices() -> void {
       WinWriteFile, WinReadFile, WinCloseFile, WinDeleteFile, WinCreateConsole,
       WinWriteConsole, WinWaitConsoleKeypress, WinSetThreadName, WinPinThread,
       WinCreateFiber, WinConvertThreadToFiber, WinSwitchToFiber,
-      WinSetCursorPosition, WinSetCursorTrapped);
+      WinDestroyFiber, WinSetCursorPosition, WinSetCursorTrapped);
 }
 
 } // namespace lumina::platform::windows

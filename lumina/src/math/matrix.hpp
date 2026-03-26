@@ -7,11 +7,12 @@
 
 namespace lumina::math {
 
-class MatrixBase : public VectorBase {};
+class MatrixBase {};
 
 class Mat2 : public MatrixBase {
 public:
   using RowType = Vec2;
+  using ScalarType = RowType::ScalarType;
   RowType rows[2]{};
 
   constexpr Mat2() noexcept : rows{{1, 0}, {0, 1}} {}
@@ -44,10 +45,12 @@ public:
     return rows[0].DataPtr();
   }
 };
+static_assert(sizeof(Mat2) == sizeof(f32) * 4, "Mat2 must be tightly packed");
 
 class Mat3 : public MatrixBase {
 public:
   using RowType = Vec3;
+  using ScalarType = RowType::ScalarType;
   RowType rows[3]{};
 
   constexpr Mat3() noexcept : rows{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}} {}
@@ -92,10 +95,12 @@ public:
     return rows[0].DataPtr();
   }
 };
+static_assert(sizeof(Mat3) == sizeof(f32) * 9, "Mat3 must be tightly packed");
 
 class Mat4 : public MatrixBase {
 public:
   using RowType = Vec4;
+  using ScalarType = RowType::ScalarType;
   RowType rows[4]{};
 
   constexpr Mat4() noexcept
@@ -156,6 +161,7 @@ public:
     return rows[0].DataPtr();
   }
 };
+static_assert(sizeof(Mat4) == sizeof(f32) * 16, "Mat4 must be tightly packed");
 
 inline auto TranslationMatrix(const Vec3 &translation) -> Mat4 {
   auto mat = Mat4::Identity();
@@ -164,22 +170,25 @@ inline auto TranslationMatrix(const Vec3 &translation) -> Mat4 {
 }
 
 // Euler angles (degrees) in YXZ intrinsic order (yaw -> pitch -> roll).
-// Row-major, Shuster convention (v * M) — matches Quaternion::CreateRotationMatrix().
+// Row-major, Shuster convention (v * M) — matches
+// Quaternion::CreateRotationMatrix().
 inline auto RotationMatrix(const Vec3 &rotation) -> Mat4 {
   const f32 pitch = DegreesToRadians(rotation.pitch);
-  const f32 yaw   = DegreesToRadians(rotation.yaw);
-  const f32 roll  = DegreesToRadians(rotation.roll);
+  const f32 yaw = DegreesToRadians(rotation.yaw);
+  const f32 roll = DegreesToRadians(rotation.roll);
 
   const f32 cp = Cos(pitch), sp = Sin(pitch);
-  const f32 cy = Cos(yaw),   sy = Sin(yaw);
-  const f32 cr = Cos(roll),  sr = Sin(roll);
+  const f32 cy = Cos(yaw), sy = Sin(yaw);
+  const f32 cr = Cos(roll), sr = Sin(roll);
 
   // Combined matrix: Ry * Rx * Rz (computed analytically)
   Mat4 mat;
-  mat[0] = Vec4((cy*cr) - (sy*sp*sr),   (cy*sr) + (sy*sp*cr),  -(sy*cp),  0.0F);
-  mat[1] = Vec4(            -(cp*sr),               (cp*cr),        sp,   0.0F);
-  mat[2] = Vec4((sy*cr) + (cy*sp*sr),   (sy*sr) - (cy*sp*cr),   (cy*cp),  0.0F);
-  mat[3] = Vec4(           0.0F,              0.0F,      0.0F,  1.0F);
+  mat[0] = Vec4((cy * cr) - (sy * sp * sr), (cy * sr) + (sy * sp * cr),
+                -(sy * cp), 0.0F);
+  mat[1] = Vec4(-(cp * sr), (cp * cr), sp, 0.0F);
+  mat[2] = Vec4((sy * cr) + (cy * sp * sr), (sy * sr) - (cy * sp * cr),
+                (cy * cp), 0.0F);
+  mat[3] = Vec4(0.0F, 0.0F, 0.0F, 1.0F);
   return mat;
 }
 

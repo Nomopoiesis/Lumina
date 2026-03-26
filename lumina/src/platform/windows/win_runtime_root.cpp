@@ -1,4 +1,4 @@
-#include "platform/common/runtime_root.hpp"
+#include "platform/platform_common/runtime_root.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

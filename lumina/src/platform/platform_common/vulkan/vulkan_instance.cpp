@@ -1,4 +1,4 @@
-#include "win_vulkan_instance.hpp"
+#include "vulkan_instance.hpp"
 
 #include "lumina_types.hpp"
 
@@ -7,7 +7,7 @@
 #include <cstring>
 #include <vector>
 
-namespace lumina::platform::windows::vulkan {
+namespace lumina::platform::common::vulkan {
 
 static auto
 CheckValidationLayerSupport(const std::vector<const char *> &validation_layers)
@@ -31,24 +31,25 @@ CheckValidationLayerSupport(const std::vector<const char *> &validation_layers)
   return true;
 }
 
-auto CreateVulkanInstance()
+auto CreateVulkanInstance(VulkanInstanceCreateInfo &create_info)
     -> std::expected<VkInstance, VkInstanceCreationError> {
   // Application info
   VkApplicationInfo app_info = {
       .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
       .pNext = nullptr,
-      .pApplicationName = "Lumina",
-      .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+      .pApplicationName = create_info.application_name.c_str(),
+      .applicationVersion =
+          VK_MAKE_VERSION(create_info.application_version_major,
+                          create_info.application_version_minor,
+                          create_info.application_version_patch),
       .pEngineName = "Lumina Engine",
       .engineVersion = VK_MAKE_VERSION(1, 0, 0),
       .apiVersion = VK_API_VERSION_1_4,
   };
 
   // Required extensions for Windows
-  std::vector<const char *> required_extensions = {
-      VK_KHR_SURFACE_EXTENSION_NAME,
-      VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-  };
+  std::vector<const char *> required_extensions =
+      create_info.required_extensions;
 
   // Validation layers (only in debug builds)
   std::vector<const char *> validation_layers;
@@ -89,4 +90,4 @@ auto DestroyVulkanInstance(VkInstance instance) -> void {
   }
 }
 
-} // namespace lumina::platform::windows::vulkan
+} // namespace lumina::platform::common::vulkan

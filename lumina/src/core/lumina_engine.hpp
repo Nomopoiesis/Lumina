@@ -5,7 +5,7 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/timer.hpp"
-#include "platform/common/vulkan/vulkan_init_result.hpp"
+#include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "math/matrix.hpp"
 
@@ -15,14 +15,10 @@
 #include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
 #include "static_mesh.hpp"
+#include "window_dimensions.hpp"
 #include "world.hpp"
 
 namespace lumina::core {
-
-struct WindowDimensions {
-  u32 width;
-  u32 height;
-};
 
 struct LuminaInitializeInfo {
   platform::common::vulkan::VkInitializationResult vulkan_init_result;
@@ -42,10 +38,10 @@ struct PointLight {
 };
 
 struct UniformBufferObject {
-  alignas(16) math::Mat4 view;
-  alignas(16) math::Mat4 proj;
+  math::Mat4 view;
+  math::Mat4 proj;
   PointLight point_lights[16];
-  alignas(16) math::Vec3 camera_position;
+  math::Vec3 camera_position;
   u32 point_light_count = 0;
 };
 
