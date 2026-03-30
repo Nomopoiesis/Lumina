@@ -41,6 +41,7 @@ auto HandleKeyPress(xcb_keycode_t keycode) -> void {
   if (key_code == UNMAPPED_KEY) {
     return;
   }
+
   auto &input = core::LuminaEngine::Instance().GetInputState();
   const auto current = input.GetKeyState(key_code);
   const bool was_down =
@@ -51,8 +52,9 @@ auto HandleKeyPress(xcb_keycode_t keycode) -> void {
 
 } // namespace
 
-auto Window::Create(const char *title) -> std::expected<std::reference_wrapper<Window>,
-                                       common::WindowCreationError> {
+auto Window::Create(const char *title)
+    -> std::expected<std::reference_wrapper<Window>,
+                     common::WindowCreationError> {
   auto &window = GetStaticInstance();
   window.connection = xcb_connect(nullptr, nullptr);
   if (xcb_connection_has_error(window.connection) != 0) {
@@ -66,7 +68,8 @@ auto Window::Create(const char *title) -> std::expected<std::reference_wrapper<W
   xcb_screen_t *screen = iter.data;
   u32 value_mask = XCB_CW_EVENT_MASK;
   u32 value_list[] = {XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_KEY_RELEASE |
-                      XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE};
+                      XCB_EVENT_MASK_BUTTON_PRESS |
+                      XCB_EVENT_MASK_BUTTON_RELEASE};
 
   // create window
   xcb_window_t window_id = xcb_generate_id(window.connection);

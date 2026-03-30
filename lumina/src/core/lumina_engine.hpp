@@ -5,6 +5,7 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/timer.hpp"
+#include "debug_overlay_controller.hpp"
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "math/matrix.hpp"
@@ -83,6 +84,15 @@ public:
   }
   [[nodiscard]] auto IsCursorTrapped() const -> bool { return trap_cursor; }
 
+  auto ToggleBoundingBoxView() -> void {
+    show_bounding_boxes = !show_bounding_boxes;
+    LOG_INFO("Toggling bounding boxes view mode ({})", show_bounding_boxes);
+  }
+
+  [[nodiscard]] auto IsBoundingBoxViewEnabled() const -> bool {
+    return show_bounding_boxes;
+  }
+
   auto WindowResized() -> void { renderer->SetFramebufferResized(true); }
 
   [[nodiscard]] auto GetWindowDimensions() const -> const WindowDimensions & {
@@ -138,9 +148,12 @@ private:
 
   bool trap_cursor = false;
 
+  bool show_bounding_boxes = false;
+
   FrameTimeInfo frame_time_info{};
 
   std::unique_ptr<CameraMovementController> camera_movement_controller;
+  std::unique_ptr<DebugOverlayController> debug_overlay_controller;
 
   InputState input_state;
   InputDispatcher input_dispatcher;

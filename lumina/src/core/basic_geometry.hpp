@@ -48,6 +48,8 @@ public:
         DataBuffer(reinterpret_cast<u8 *>(tex_coords.data()),
                    tex_coords.size() * sizeof(math::Vec2)));
     mesh.indices = indices;
+    mesh.bounding_box =
+        ComputeAABoundingBox(positions.data(), positions.size());
     return mesh;
   }
 
@@ -162,6 +164,8 @@ public:
         DataBuffer(reinterpret_cast<u8 *>(tex_coords.data()),
                    tex_coords.size() * sizeof(math::Vec2)));
     mesh.indices = std::move(indices);
+    mesh.bounding_box =
+        ComputeAABoundingBox(positions.data(), positions.size());
     return mesh;
   }
 };

@@ -1,7 +1,9 @@
 #include "static_shader_api.hpp"
 
 #include "common/path_registry.hpp"
+#include "headers/color_output.frag.hpp"
 #include "headers/interface.global.hpp"
+#include "headers/position_only.vert.hpp"
 #include "headers/simple_input_basic_mat.frag.hpp"
 #include "headers/simple_model_input.vert.hpp"
 
@@ -44,6 +46,42 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
   auto mat_template_handle = renderer->CreateMaterialTemplate(mat_desc);
 
   renderer->SetDefaultMaterialTemplate(mat_template_handle);
+
+  // Debug wireframe — position-only, no set 1 bindings, no material instances
+  namespace dbg_vert = lumina::shaders::position_only::vert;
+  namespace dbg_frag = lumina::shaders::color_output::frag;
+
+  auto dbg_interface_result = ShaderInterface::Create(
+      renderer->GetVulkanContext().GetDevice(), dbg_vert::kLayout,
+      dbg_frag::kLayout, "debug_wireframe",
+      renderer->GetGlobalDescriptorSetLayout(), global::kLayout);
+  if (!dbg_interface_result) {
+    LOG_CRITICAL("Failed to create debug wireframe shader interface: {}",
+                 dbg_interface_result.error().message);
+    LUMINA_TERMINATE();
+  }
+
+  auto dbg_interface_index =
+      renderer->AddShaderInterface(std::move(dbg_interface_result.value()));
+
+  MaterialTemplateDescription dbg_mat_desc = {
+      .shader_interface_index = dbg_interface_index,
+      .vertex_layout = dbg_vert::kLayout,
+      .fragment_layout = dbg_frag::kLayout,
+      .vertex_shader_bin_path =
+          lumina::common::PathRegistry::Instance()
+              .shaders.Resolve("debug_wireframe.vert.spv")
+              .string(),
+      .fragment_shader_bin_path =
+          lumina::common::PathRegistry::Instance()
+              .shaders.Resolve("debug_wireframe.frag.spv")
+              .string(),
+      .max_instances = 0,
+  };
+  auto dbg_mat_template_handle =
+      renderer->CreateMaterialTemplate(dbg_mat_desc);
+
+  renderer->SetDebugWireframeMaterialTemplate(dbg_mat_template_handle);
 }
 
 auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)

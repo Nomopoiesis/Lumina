@@ -1,8 +1,9 @@
 #pragma once
 
-#include "core/resource_manager.hpp"
+#include "shaders/shader_layout.hpp"
 
-#include "shaders/shader_interface.hpp"
+#include <expected>
+#include <string>
 
 namespace lumina::renderer {
 
@@ -23,7 +24,7 @@ class MaterialTemplate {
 public: // static methods
   static auto Create(const std::string &vertex_shader_bin_path,
                      const std::string &fragment_shader_bin_path,
-                     ShaderInterface &shader_interface)
+                     size_t shader_interface_index)
       -> std::expected<MaterialTemplate, MaterialTemplateCreateError>;
 
 public: // instance methods
@@ -35,8 +36,8 @@ public: // instance methods
   auto operator=(MaterialTemplate &&) noexcept -> MaterialTemplate & = default;
   ~MaterialTemplate() noexcept = default;
 
-  [[nodiscard]] auto GetShaderInterface() const -> ShaderInterface * {
-    return shader_interface;
+  [[nodiscard]] auto GetShaderInterfaceIndex() const -> size_t {
+    return shader_interface_index;
   }
 
   [[nodiscard]] auto GetVertexShaderBinPath() const -> const std::string & {
@@ -48,7 +49,7 @@ public: // instance methods
   }
 
 private: // member variables
-  ShaderInterface *shader_interface = nullptr;
+  size_t shader_interface_index = 0;
   std::string vertex_shader_bin_path;
   std::string fragment_shader_bin_path;
 };

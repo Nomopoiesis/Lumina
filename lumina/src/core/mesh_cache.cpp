@@ -5,7 +5,6 @@
 #include "platform/platform_common/file_handle.hpp"
 
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 namespace lumina::core {
@@ -24,6 +23,8 @@ using lumina::platform::common::InvalidFileHandle;
 //     [1]  ElementType (u8)
 //     [8]  data_byte_count: u64
 //     [N]  raw attribute bytes
+//   [12] Vec3[float, float, float] - bounding box min
+//   [12] Vec3[float, float, float] - bounding box max
 //   [index_count * 2]  u16 index array
 
 namespace {
@@ -88,6 +89,9 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
     write(&byte_count, sizeof(byte_count));
     write(data.Data(), static_cast<std::streamsize>(byte_count));
   }
+
+  write(&mesh.bounding_box.min, sizeof(mesh.bounding_box.min));
+  write(&mesh.bounding_box.max, sizeof(mesh.bounding_box.max));
 
   write(mesh.indices.data(),
         static_cast<std::streamsize>(mesh.indices.size() * sizeof(u16)));
@@ -191,6 +195,11 @@ auto DeserializeStaticMesh(std::string_view cache_key,
                         .element_type = static_cast<ElementType>(elem_type)},
         std::move(data));
   }
+
+  mesh.bounding_box.min = data_to_read.As<math::Vec3>(offset);
+  offset += sizeof(math::Vec3);
+  mesh.bounding_box.max = data_to_read.As<math::Vec3>(offset);
+  offset += sizeof(math::Vec3);
 
   mesh.indices.resize(index_count);
   std::memcpy(mesh.indices.data(), data_to_read.Data() + offset,

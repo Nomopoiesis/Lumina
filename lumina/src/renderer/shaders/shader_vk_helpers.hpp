@@ -2,11 +2,25 @@
 
 #include "lumina_assert.hpp"
 
+#include "graphics_pipeline.hpp"
 #include "shader_layout.hpp"
 
 #include <vulkan/vulkan.h>
 
 namespace lumina::renderer {
+
+static auto ToVkPrimitiveTopology(PrimitiveTopology topology)
+    -> VkPrimitiveTopology {
+  switch (topology) {
+    case PrimitiveTopology::TriangleList:
+      return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    case PrimitiveTopology::LineList:
+      return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    default:
+      ASSERT(false, "Unsupported primitive topology");
+      return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  }
+}
 
 static auto ToVkDescriptorType(DescriptorBindingType type) -> VkDescriptorType {
   switch (type) {

@@ -8,9 +8,15 @@
 
 namespace lumina::renderer {
 
+enum class PrimitiveTopology : u8 {
+  TriangleList,
+  LineList,
+};
+
 struct GraphicsPipelineDesc {
   VertexBufferLayout vertex_layout;
   MaterialTemplateHandle material_template;
+  PrimitiveTopology topology = PrimitiveTopology::TriangleList;
 };
 
 struct GraphicsPipeline {

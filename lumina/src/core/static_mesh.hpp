@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bounding_box.hpp"
 #include "data_structures/data_buffer.hpp"
 #include "renderer/render_mesh.hpp"
 #include "resource_manager.hpp"
@@ -22,6 +23,9 @@ public:
   size_t vertex_count = 0;
   std::vector<std::pair<VertexAttribute, DataBuffer>> vertex_attributes;
   std::vector<u16> indices;
+
+  AABoudingBox bounding_box;
+
   renderer::RenderMeshHandle render_mesh_handle;
 };
 

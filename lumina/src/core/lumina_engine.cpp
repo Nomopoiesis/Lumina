@@ -89,6 +89,38 @@ static auto SpawnMeshEntities(World &world, u32 count,
   }
 }
 
+// Unit cube wireframe (line list): 8 vertices, 24 line-list indices (12 edges ×
+// 2).
+static auto WireframeBox() -> StaticMesh {
+  StaticMesh mesh;
+
+  std::vector<math::Vec3> positions = {
+      {-0.5F, -0.5F, -0.5F}, // v0
+      {+0.5F, -0.5F, -0.5F}, // v1
+      {+0.5F, +0.5F, -0.5F}, // v2
+      {-0.5F, +0.5F, -0.5F}, // v3
+      {-0.5F, -0.5F, +0.5F}, // v4
+      {+0.5F, -0.5F, +0.5F}, // v5
+      {+0.5F, +0.5F, +0.5F}, // v6
+      {-0.5F, +0.5F, +0.5F}, // v7
+  };
+
+  std::vector<u16> indices = {
+      0, 1, 1, 2, 2, 3, 3, 0, // back face
+      4, 5, 5, 6, 6, 7, 7, 4, // front face
+      0, 4, 1, 5, 2, 6, 3, 7, // connecting edges
+  };
+
+  mesh.vertex_count = positions.size();
+  mesh.vertex_attributes.emplace_back(
+      VertexAttribute{.type = VertexAttributeType::Position,
+                      .element_type = ElementType::Vec3},
+      DataBuffer(reinterpret_cast<u8 *>(positions.data()),
+                 positions.size() * sizeof(math::Vec3)));
+  mesh.indices = std::move(indices);
+  return mesh;
+}
+
 static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
   input_action_map.BindAction(ActionID(std::string_view("MoveForward")),
                               KeyInputBinding(KeyCode::W, KeyState::Held));
@@ -109,6 +141,10 @@ static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
   input_action_map.BindAction(
       ActionID(std::string_view("TrapCursor")),
       MouseButtonInputBinding(MouseButton::Right, KeyState::Held));
+
+  input_action_map.BindAction(
+      ActionID(std::string_view("ToggleBoundingBoxView")),
+      KeyInputBinding(KeyCode::F3, KeyState::Pressed));
 }
 
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
@@ -122,21 +158,32 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
 
+  {
+    auto wireframe_box = WireframeBox();
+    auto dbg_mesh_handle = instance.renderer->CreateRenderMesh(
+        wireframe_box, instance.renderer->GetDebugAABBPipelineHandle());
+    instance.renderer->SetDebugAABBRenderMesh(dbg_mesh_handle);
+  }
+
   instance.camera_movement_controller =
       std::make_unique<CameraMovementController>(INVALID_ENTITY_ID);
+  instance.debug_overlay_controller =
+      std::make_unique<DebugOverlayController>();
 
   InitializeInputActionMap(instance.input_dispatcher.GetInputActionMap());
   instance.input_dispatcher.RegisterHandler(
       instance.camera_movement_controller.get(), 10);
+  instance.input_dispatcher.RegisterHandler(
+      instance.debug_overlay_controller.get(), 5);
 
-  constexpr std::string_view kModelCacheKey = "suzanne";
+  constexpr std::string_view ModelCacheKey = "suzanne";
   const auto &model_cache =
       lumina::common::PathRegistry::Instance().model_cache;
 
   StaticMesh static_mesh;
-  if (HasCachedMesh(kModelCacheKey, model_cache)) {
+  if (HasCachedMesh(ModelCacheKey, model_cache)) {
     LOG_INFO("Loading mesh from cache: suzanne");
-    auto result = DeserializeStaticMesh(kModelCacheKey, model_cache);
+    auto result = DeserializeStaticMesh(ModelCacheKey, model_cache);
     if (!result.has_value()) {
       LOG_CRITICAL("Failed to deserialize cached mesh: %s",
                    result.error().message);
@@ -178,8 +225,11 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                    obj_data.tex_coords.size() * sizeof(math::Vec2)));
     static_mesh.indices = obj_data.indices;
 
+    static_mesh.bounding_box = ComputeAABoundingBox(obj_data.positions.data(),
+                                                    obj_data.positions.size());
+
     auto cache_result =
-        SerializeStaticMesh(static_mesh, kModelCacheKey, model_cache);
+        SerializeStaticMesh(static_mesh, ModelCacheKey, model_cache);
     if (!cache_result.has_value()) {
       LOG_WARNING("Failed to write mesh cache: %s",
                   cache_result.error().message);
@@ -317,7 +367,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
     // Build draw list from all StaticMeshComponents with uploaded meshes
     auto *engine = static_cast<LuminaEngine *>(data);
     auto *frame_context = engine->renderer->GetFrameContextForUpdate();
-    frame_context->render_draw_list.clear();
+    frame_context->draw_list.clear();
     engine->current_world->ForEachComponent<StaticMeshComponent>(
         [engine, frame_context](EntityID id,
                                 const StaticMeshComponent &component) -> void {
@@ -331,11 +381,29 @@ auto LuminaEngine::ExecuteFrame() -> void {
           if (mesh->render_mesh_handle.index == INVALID_RESOURCE_HANDLE_INDEX) {
             return;
           }
-          frame_context->render_draw_list.push_back(
-              {.render_mesh_handle = mesh->render_mesh_handle,
-               .material_instance =
-                   engine->renderer->GetDefaultMaterialInstanceHandle(),
-               .model = transform.GetModelMatrix()});
+          frame_context->draw_list.emplace_back(renderer::DrawMeshCommand{
+              .render_mesh_handle = mesh->render_mesh_handle,
+              .material_instance =
+                  engine->renderer->GetDefaultMaterialInstanceHandle(),
+              .model = transform.GetModelMatrix()});
+          if (engine->show_bounding_boxes) {
+            auto world_aabb = TransformAABoundingBox(
+                mesh->bounding_box, transform.GetModelMatrix());
+            math::Vec3 center{
+                (world_aabb.min.x + world_aabb.max.x) * 0.5F,
+                (world_aabb.min.y + world_aabb.max.y) * 0.5F,
+                (world_aabb.min.z + world_aabb.max.z) * 0.5F,
+            };
+            math::Vec3 size{
+                world_aabb.max.x - world_aabb.min.x,
+                world_aabb.max.y - world_aabb.min.y,
+                world_aabb.max.z - world_aabb.min.z,
+            };
+            frame_context->draw_list.emplace_back(
+                renderer::DrawDebugAABBCommand{
+                    .model = math::Dot(math::ScaleMatrix(size),
+                                       math::TranslationMatrix(center))});
+          }
         });
   };
   job->data = this;

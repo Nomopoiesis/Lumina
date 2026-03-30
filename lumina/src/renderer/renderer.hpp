@@ -132,12 +132,39 @@ public:
     default_material_template_handle = handle;
   }
 
+  auto SetDebugWireframeMaterialTemplate(MaterialTemplateHandle handle) -> void {
+    debug_wireframe_material_template_handle = handle;
+  }
+
+  [[nodiscard]] auto GetDebugWireframeMaterialTemplateHandle() const noexcept
+      -> MaterialTemplateHandle {
+    return debug_wireframe_material_template_handle;
+  }
+
+  auto SetDebugAABBPipeline(GraphicsPipelineHandle handle) -> void {
+    debug_aabb_pipeline_handle = handle;
+  }
+
+  [[nodiscard]] auto GetDebugAABBPipelineHandle() const noexcept
+      -> GraphicsPipelineHandle {
+    return debug_aabb_pipeline_handle;
+  }
+
+  auto SetDebugAABBRenderMesh(RenderMeshHandle handle) -> void {
+    debug_aabb_render_mesh_handle = handle;
+  }
+
   [[nodiscard]] auto GetGlobalDescriptorSetLayout() const noexcept
       -> VkDescriptorSetLayout {
     return global_descriptor_set_layout;
   }
 
 private:
+  [[nodiscard]] auto GetShaderInterfaceFor(const MaterialTemplate &tmpl)
+      -> ShaderInterface & {
+    return shader_interfaces[tmpl.GetShaderInterfaceIndex()];
+  }
+
   auto RenderThread() -> void;
 
   auto AcquireFrameContextForRender() -> void;
@@ -214,8 +241,11 @@ private:
   size_t max_persistent_descriptor_sets = 0;
 
   MaterialTemplateHandle default_material_template_handle;
+  MaterialTemplateHandle debug_wireframe_material_template_handle;
   MaterialInstanceHandle default_material_instance_handle;
   GraphicsPipelineHandle default_pipeline_handle;
+  GraphicsPipelineHandle debug_aabb_pipeline_handle;
+  RenderMeshHandle debug_aabb_render_mesh_handle;
 
   RenderMeshManager render_mesh_manager;
   MaterialTemplateManager material_template_manager;

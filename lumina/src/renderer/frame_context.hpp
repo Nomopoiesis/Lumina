@@ -9,6 +9,7 @@
 #include "vulkan_context.hpp"
 
 #include <memory>
+#include <variant>
 #include <vector>
 
 namespace lumina::renderer {
@@ -27,11 +28,17 @@ enum class FrameContextPipelineState : u8 {
   RENDER_COMPLETE,
 };
 
-struct DrawMeshInfo {
+struct DrawMeshCommand {
   RenderMeshHandle render_mesh_handle;
   MaterialInstanceHandle material_instance;
   math::Mat4 model;
 };
+
+struct DrawDebugAABBCommand {
+  math::Mat4 model;
+};
+
+using DrawCommand = std::variant<DrawMeshCommand, DrawDebugAABBCommand>;
 
 struct FrameContextUniformBuffer {
   FrameContextUniformBuffer() noexcept = default;
@@ -113,7 +120,7 @@ public:
     return uniform_buffer;
   }
 
-  std::vector<DrawMeshInfo> render_draw_list;
+  std::vector<DrawCommand> draw_list;
 
 private:
   VulkanContext &vulkan_context;
