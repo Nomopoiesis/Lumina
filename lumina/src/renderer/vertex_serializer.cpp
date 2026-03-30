@@ -10,7 +10,7 @@ auto SerializeVertexBuffer(const core::StaticMesh &mesh,
   std::vector<std::pair<size_t, DataBuffer>> vertex_buffers;
   for (const auto &stream : layout.streams) {
     size_t attribute_stride = 0;
-    std::vector<const std::pair<core::VertexAttribute, std::vector<u8>> *>
+    std::vector<const std::pair<core::VertexAttribute, DataBuffer> *>
         attribute_data;
     for (const auto &stream_attribute : stream.attributes) {
       auto it = std::ranges::find_if(
@@ -30,8 +30,8 @@ auto SerializeVertexBuffer(const core::StaticMesh &mesh,
       for (const auto *data : attribute_data) {
         const size_t elem_size =
             core::GetElementTypeSize(data->first.element_type);
-        vertex_buffer.Write(write_offset,
-                            data->second.data() + (i * elem_size), elem_size);
+        vertex_buffer.Write(write_offset, data->second.Data() + (i * elem_size),
+                            elem_size);
         write_offset += elem_size;
       }
     }

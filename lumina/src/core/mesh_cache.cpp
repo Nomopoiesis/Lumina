@@ -82,11 +82,11 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
   for (const auto &[attr, data] : mesh.vertex_attributes) {
     const auto attr_type = static_cast<u8>(attr.type);
     const auto elem_type = static_cast<u8>(attr.element_type);
-    const auto byte_count = static_cast<u64>(data.size());
+    const auto byte_count = static_cast<u64>(data.Size());
     write(&attr_type, sizeof(attr_type));
     write(&elem_type, sizeof(elem_type));
     write(&byte_count, sizeof(byte_count));
-    write(data.data(), static_cast<std::streamsize>(byte_count));
+    write(data.Data(), static_cast<std::streamsize>(byte_count));
   }
 
   write(mesh.indices.data(),
@@ -182,8 +182,8 @@ auto DeserializeStaticMesh(std::string_view cache_key,
     byte_count = data_to_read.As<u64>(offset);
     offset += sizeof(u64);
 
-    std::vector<u8> data(byte_count);
-    std::memcpy(data.data(), data_to_read.Data() + offset, byte_count);
+    DataBuffer data(byte_count);
+    std::memcpy(data.Data(), data_to_read.Data() + offset, byte_count);
     offset += byte_count;
 
     mesh.vertex_attributes.emplace_back(

@@ -1,9 +1,12 @@
 #pragma once
 
+#include "data_structures/data_buffer.hpp"
 #include "math/vector.hpp"
 #include "static_mesh.hpp"
 
 namespace lumina::core {
+
+using common::data_structures::DataBuffer;
 
 class BasicGeometry {
 public:
@@ -32,21 +35,18 @@ public:
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Position,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(
-            reinterpret_cast<u8 *>(positions.data()),
-            reinterpret_cast<u8 *>(positions.data() + positions.size())));
+        DataBuffer(reinterpret_cast<u8 *>(positions.data()),
+                   positions.size() * sizeof(math::Vec3)));
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Normal,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(
-            reinterpret_cast<u8 *>(normals.data()),
-            reinterpret_cast<u8 *>(normals.data() + normals.size())));
+        DataBuffer(reinterpret_cast<u8 *>(normals.data()),
+                   normals.size() * sizeof(math::Vec3)));
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::TexCoord,
                         .element_type = ElementType::Vec2},
-        std::vector<u8>(
-            reinterpret_cast<u8 *>(tex_coords.data()),
-            reinterpret_cast<u8 *>(tex_coords.data() + tex_coords.size())));
+        DataBuffer(reinterpret_cast<u8 *>(tex_coords.data()),
+                   tex_coords.size() * sizeof(math::Vec2)));
     mesh.indices = indices;
     return mesh;
   }
@@ -149,21 +149,18 @@ public:
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Position,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(
-            reinterpret_cast<u8 *>(positions.data()),
-            reinterpret_cast<u8 *>(positions.data() + positions.size())));
+        DataBuffer(reinterpret_cast<u8 *>(positions.data()),
+                   positions.size() * sizeof(math::Vec3)));
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Normal,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(
-            reinterpret_cast<u8 *>(normals.data()),
-            reinterpret_cast<u8 *>(normals.data() + normals.size())));
+        DataBuffer(reinterpret_cast<u8 *>(normals.data()),
+                   normals.size() * sizeof(math::Vec3)));
     mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::TexCoord,
                         .element_type = ElementType::Vec2},
-        std::vector<u8>(
-            reinterpret_cast<u8 *>(tex_coords.data()),
-            reinterpret_cast<u8 *>(tex_coords.data() + tex_coords.size())));
+        DataBuffer(reinterpret_cast<u8 *>(tex_coords.data()),
+                   tex_coords.size() * sizeof(math::Vec2)));
     mesh.indices = std::move(indices);
     return mesh;
   }

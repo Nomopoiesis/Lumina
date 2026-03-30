@@ -2,9 +2,11 @@
 
 #include <unordered_set>
 
+#include "common/data_structures/data_buffer.hpp"
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
 #include "common/path_registry.hpp"
+#include "data_structures/data_buffer.hpp"
 #include "platform/platform_common/file_handle.hpp"
 
 #include "basic_geometry.hpp"
@@ -20,6 +22,7 @@
 
 namespace lumina::core {
 
+using lumina::common::data_structures::DataBuffer;
 using lumina::platform::common::InvalidFileHandle;
 
 using namespace lumina::core::components;
@@ -161,21 +164,18 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
     static_mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Position,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(reinterpret_cast<u8 *>(obj_data.positions.data()),
-                        reinterpret_cast<u8 *>(obj_data.positions.data() +
-                                               obj_data.positions.size())));
+        DataBuffer(reinterpret_cast<u8 *>(obj_data.positions.data()),
+                   obj_data.positions.size() * sizeof(math::Vec3)));
     static_mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Normal,
                         .element_type = ElementType::Vec3},
-        std::vector<u8>(reinterpret_cast<u8 *>(obj_data.normals.data()),
-                        reinterpret_cast<u8 *>(obj_data.normals.data() +
-                                               obj_data.normals.size())));
+        DataBuffer(reinterpret_cast<u8 *>(obj_data.normals.data()),
+                   obj_data.normals.size() * sizeof(math::Vec3)));
     static_mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::TexCoord,
                         .element_type = ElementType::Vec2},
-        std::vector<u8>(reinterpret_cast<u8 *>(obj_data.tex_coords.data()),
-                        reinterpret_cast<u8 *>(obj_data.tex_coords.data() +
-                                               obj_data.tex_coords.size())));
+        DataBuffer(reinterpret_cast<u8 *>(obj_data.tex_coords.data()),
+                   obj_data.tex_coords.size() * sizeof(math::Vec2)));
     static_mesh.indices = obj_data.indices;
 
     auto cache_result =
