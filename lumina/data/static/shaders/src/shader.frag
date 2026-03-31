@@ -8,9 +8,9 @@ void main() {
   vec3 normal = normalize(fragWorldNormal);
   vec3 ambient =
       material_uniforms.ambient_intensity * material_uniforms.ambient_color;
-  PointLight point_light = ubo.point_lights[0];
+  PointLight point_light = frame_globals.point_lights[0];
   vec3 light_direction = normalize(point_light.position - fragWorldPosition);
-  vec3 view_direction = normalize(ubo.camera_position - fragWorldPosition);
+  vec3 view_direction = normalize(frame_globals.camera_position - fragWorldPosition);
   vec3 reflect_direction = reflect(-light_direction, normal);
   float distance = length(point_light.position - fragWorldPosition);
   vec3 diffuse = vec3(0.0, 0.0, 0.0);

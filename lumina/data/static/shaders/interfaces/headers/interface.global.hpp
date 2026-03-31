@@ -14,13 +14,13 @@ struct PointLight {
   float attenuation_radius;
 }; // struct PointLight
 
-struct UniformBufferObject {
+struct FrameGlobals {
   lumina::math::Mat4 view;
   lumina::math::Mat4 proj;
   PointLight point_lights[16];
   lumina::math::Vec3 camera_position;
   int32_t point_light_count;
-}; // struct UniformBufferObject
+}; // struct FrameGlobals
 
 struct PushConstants {
   lumina::math::Mat4 model;
@@ -30,8 +30,8 @@ static constexpr lumina::renderer::ShaderBindingInfo kBindings[] = {
     {.set = 0,
      .binding = 0,
      .type = lumina::renderer::DescriptorBindingType::UniformBuffer,
-     .name = "ubo",
-     .block_size = sizeof(UniformBufferObject),
+     .name = "frame_globals",
+     .block_size = sizeof(FrameGlobals),
      .array_count = 1}};
 
 static constexpr lumina::renderer::ShaderLayout kLayout = {
@@ -43,17 +43,17 @@ static constexpr lumina::renderer::ShaderLayout kLayout = {
     .vertex_input_layout = {}};
 
 struct BindingData {
-  VkBuffer ubo_buffer;
-  VkDeviceSize ubo_offset = 0;
-  VkDeviceSize ubo_range = sizeof(UniformBufferObject);
+  VkBuffer frame_globals_buffer;
+  VkDeviceSize frame_globals_offset = 0;
+  VkDeviceSize frame_globals_range = sizeof(FrameGlobals);
 }; // struct BindingData
 
 inline void WriteDescriptors(VkDevice device, VkDescriptorSet set,
                              const BindingData &data) {
   VkDescriptorBufferInfo buffer_info_0{
-      .buffer = data.ubo_buffer,
-      .offset = data.ubo_offset,
-      .range = data.ubo_range,
+      .buffer = data.frame_globals_buffer,
+      .offset = data.frame_globals_offset,
+      .range = data.frame_globals_range,
   };
   VkWriteDescriptorSet writes[] = {
       {

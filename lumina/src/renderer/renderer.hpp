@@ -95,7 +95,7 @@ public:
       -> GraphicsPipelineHandle;
 
   auto CreateRenderMesh(const core::StaticMesh &mesh,
-                        GraphicsPipelineHandle pipeline_handle)
+                        MaterialTemplateHandle material_template)
       -> RenderMeshHandle;
   auto DestroyRenderMesh(RenderMeshHandle handle) -> void;
 
@@ -104,9 +104,9 @@ public:
     return default_material_instance_handle;
   }
 
-  [[nodiscard]] auto GetDefaultGraphicsPipelineHandle() const noexcept
-      -> GraphicsPipelineHandle {
-    return default_pipeline_handle;
+  [[nodiscard]] auto GetDefaultMaterialTemplateHandle() const noexcept
+      -> MaterialTemplateHandle {
+    return default_material_template_handle;
   }
 
   [[nodiscard]] auto GetMaterialInstance(MaterialInstanceHandle handle) noexcept
@@ -139,19 +139,6 @@ public:
   [[nodiscard]] auto GetDebugWireframeMaterialTemplateHandle() const noexcept
       -> MaterialTemplateHandle {
     return debug_wireframe_material_template_handle;
-  }
-
-  auto SetDebugAABBPipeline(GraphicsPipelineHandle handle) -> void {
-    debug_aabb_pipeline_handle = handle;
-  }
-
-  [[nodiscard]] auto GetDebugAABBPipelineHandle() const noexcept
-      -> GraphicsPipelineHandle {
-    return debug_aabb_pipeline_handle;
-  }
-
-  auto SetDebugAABBRenderMesh(RenderMeshHandle handle) -> void {
-    debug_aabb_render_mesh_handle = handle;
   }
 
   [[nodiscard]] auto GetGlobalDescriptorSetLayout() const noexcept
@@ -245,7 +232,6 @@ private:
   MaterialInstanceHandle default_material_instance_handle;
   GraphicsPipelineHandle default_pipeline_handle;
   GraphicsPipelineHandle debug_aabb_pipeline_handle;
-  RenderMeshHandle debug_aabb_render_mesh_handle;
 
   RenderMeshManager render_mesh_manager;
   MaterialTemplateManager material_template_manager;

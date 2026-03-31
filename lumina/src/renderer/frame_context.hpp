@@ -35,6 +35,7 @@ struct DrawMeshCommand {
 };
 
 struct DrawDebugAABBCommand {
+  RenderMeshHandle render_mesh_handle;
   math::Mat4 model;
 };
 

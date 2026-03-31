@@ -2,6 +2,7 @@
 
 #include "bounding_box.hpp"
 #include "data_structures/data_buffer.hpp"
+#include "renderer/primitive_topology.hpp"
 #include "renderer/render_mesh.hpp"
 #include "resource_manager.hpp"
 #include "vertex_attribute.hpp"
@@ -21,6 +22,7 @@ public:
 
   bool render_active = false;
   size_t vertex_count = 0;
+  renderer::PrimitiveTopology topology = renderer::PrimitiveTopology::TriangleList;
   std::vector<std::pair<VertexAttribute, DataBuffer>> vertex_attributes;
   std::vector<u16> indices;
 

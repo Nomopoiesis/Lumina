@@ -166,6 +166,10 @@ auto GetGlobalDescriptorPoolSizes(std::vector<VkDescriptorPoolSize> &pool_sizes)
   }
 }
 
+auto GetFrameGlobalsBufferSize() -> VkDeviceSize {
+  return sizeof(shaders::interface::global::FrameGlobals);
+}
+
 auto GetDefaultMaterialUBOSize() -> VkDeviceSize {
   return sizeof(shaders::simple_input_basic_mat::frag::MaterialUniforms);
 }
@@ -204,7 +208,7 @@ auto WriteTransientDescriptors(LuminaRenderer *renderer,
   namespace global = shaders::interface::global;
   global::WriteDescriptors(
       renderer->vulkan_context.GetDevice(), descriptor_set,
-      {.ubo_buffer = frame_context.GetUniformBuffer().buffer});
+      {.frame_globals_buffer = frame_context.GetUniformBuffer().buffer});
 }
 
 } // namespace lumina::renderer

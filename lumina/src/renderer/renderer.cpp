@@ -5,7 +5,6 @@
 #include "common/lumina_assert.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/path_registry.hpp"
-#include "core/lumina_engine.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
@@ -447,8 +446,7 @@ auto LuminaRenderer::CreateDescriptorPools()
 
 static auto CreateUniformBuffer(VulkanContext &vulkan_context,
                                 VkDeviceMemory &memory, VkBuffer &buffer,
-                                void *&mapped_data) -> bool {
-  VkDeviceSize size = sizeof(core::UniformBufferObject);
+                                void *&mapped_data, VkDeviceSize size) -> bool {
   if (!CreateBuffer(vulkan_context, size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
@@ -961,7 +959,8 @@ auto LuminaRenderer::Initialize() -> void {
     auto &uniform_buffer = frame_contexts[i]->GetUniformBuffer();
     auto uniform_buffer_result =
         CreateUniformBuffer(vulkan_context, uniform_buffer.memory,
-                            uniform_buffer.buffer, uniform_buffer.mapped);
+                            uniform_buffer.buffer, uniform_buffer.mapped,
+                            GetFrameGlobalsBufferSize());
     ASSERT(uniform_buffer_result, "Failed to create uniform buffer");
   }
 
@@ -1551,6 +1550,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
     LUMINA_TERMINATE();
   }
 
+  gfx_pipeline.topology = desc.topology;
   auto handle = pipeline_manager.Create(std::move(gfx_pipeline));
   return handle;
 }
@@ -1742,7 +1742,7 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
             auto pipeline_opt =
                 pipeline_manager.Get(debug_aabb_pipeline_handle);
             auto render_mesh_opt =
-                render_mesh_manager.Get(debug_aabb_render_mesh_handle);
+                render_mesh_manager.Get(cmd.render_mesh_handle);
             if (!pipeline_opt.has_value() || !render_mesh_opt.has_value() ||
                 !render_mesh_opt.value()->ready) {
               return;
@@ -1803,19 +1803,26 @@ auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
 }
 
 auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
-                                      GraphicsPipelineHandle pipeline_handle)
+                                      MaterialTemplateHandle material_template)
     -> RenderMeshHandle {
-  auto pipeline_opt = pipeline_manager.Get(pipeline_handle);
-  ASSERT(pipeline_opt.has_value(),
-         "Pipeline not found for render mesh creation");
-  auto &pipeline = pipeline_opt.value();
-  const VertexBufferLayout &layout = pipeline->vertex_layout;
+  GraphicsPipelineHandle pipeline_handle;
+  const VertexBufferLayout *layout = nullptr;
+  pipeline_manager.ForEach([&](GraphicsPipelineHandle handle,
+                               GraphicsPipeline &pipeline) {
+    if (pipeline.material_template.index == material_template.index &&
+        pipeline.topology == mesh.topology) {
+      pipeline_handle = handle;
+      layout = &pipeline.vertex_layout;
+    }
+  });
+  ASSERT(layout != nullptr,
+         "No pipeline found matching material template and mesh topology");
 
   auto &cmd_ctx = AcquireCommandContext();
   cmd_ctx.Begin();
   RenderMesh render_mesh;
   render_mesh.pipeline_handle = pipeline_handle;
-  auto vertex_streams_data = SerializeVertexBuffer(mesh, layout);
+  auto vertex_streams_data = SerializeVertexBuffer(mesh, *layout);
   render_mesh.vertex_count = mesh.vertex_count;
   std::vector<VulkanBufferResources> staging_resources;
   for (const auto &[stream_stride, vertex_stream] : vertex_streams_data) {

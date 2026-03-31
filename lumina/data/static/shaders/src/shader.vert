@@ -6,7 +6,7 @@
 
 void main() {
   vec4 wolrd_pos = vec4(inPosition, 1.0) * pc.model;
-  gl_Position = wolrd_pos * ubo.view * ubo.proj;
+  gl_Position = wolrd_pos * frame_globals.view * frame_globals.proj;
   fragWorldPosition = wolrd_pos.xyz;
   fragWorldNormal = normalize(inNormal * mat3(pc.model));
   fragTexCoord = inTexCoord;

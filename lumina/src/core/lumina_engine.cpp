@@ -19,6 +19,7 @@
 #include "math/basic.hpp"
 #include "math/trigonometry.hpp"
 #include "mesh_cache.hpp"
+#include "uniform_interface/uniform_interface.hpp"
 
 namespace lumina::core {
 
@@ -26,33 +27,6 @@ using lumina::common::data_structures::DataBuffer;
 using lumina::platform::common::InvalidFileHandle;
 
 using namespace lumina::core::components;
-
-static auto UpdateUniformBuffer(void *&mapped_data) -> bool {
-  auto &world = core::LuminaEngine::Instance().GetCurrentWorld();
-  auto camera_id = world.GetActiveCamera();
-  auto transform = world.GetComponent<core::components::Transform>(camera_id);
-  auto camera = world.GetComponent<core::components::Camera>(camera_id);
-  UniformBufferObject ubo = {};
-  ubo.view = CalculateViewMatrix(transform);
-  ubo.proj = camera.ToProjectionMatrix();
-  ubo.camera_position = transform.position;
-  ubo.point_light_count = 0;
-  world.ForEachComponent<LightComponent>(
-      [&ubo, &world](EntityID id, const LightComponent &component) -> void {
-        if (ubo.point_light_count >= 16) {
-          return;
-        }
-        ubo.point_lights[ubo.point_light_count++] = {
-            .position = world.GetComponent<Transform>(id).position,
-            .intensity = component.intensity,
-            .color = component.color,
-            .attenuation_radius = component.attenation_radius,
-        };
-      });
-
-  memcpy(mapped_data, &ubo, sizeof(UniformBufferObject));
-  return true;
-}
 
 static auto SpawnMeshEntities(World &world, u32 count,
                               StaticMeshHandle mesh_handle,
@@ -111,6 +85,7 @@ static auto WireframeBox() -> StaticMesh {
       0, 4, 1, 5, 2, 6, 3, 7, // connecting edges
   };
 
+  mesh.topology = renderer::PrimitiveTopology::LineList;
   mesh.vertex_count = positions.size();
   mesh.vertex_attributes.emplace_back(
       VertexAttribute{.type = VertexAttributeType::Position,
@@ -160,9 +135,13 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
 
   {
     auto wireframe_box = WireframeBox();
-    auto dbg_mesh_handle = instance.renderer->CreateRenderMesh(
-        wireframe_box, instance.renderer->GetDebugAABBPipelineHandle());
-    instance.renderer->SetDebugAABBRenderMesh(dbg_mesh_handle);
+    auto render_mesh_handle = instance.renderer->CreateRenderMesh(
+        wireframe_box,
+        instance.renderer->GetDebugWireframeMaterialTemplateHandle());
+    wireframe_box.render_mesh_handle = render_mesh_handle;
+    instance.debug_aabb_mesh_handle =
+        instance.static_mesh_manager.Create(std::move(wireframe_box));
+    instance.static_mesh_manager.ProcessDeferredOperations();
   }
 
   instance.camera_movement_controller =
@@ -339,7 +318,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
           ASSERT(m_opt.has_value(), "Static mesh not found");
           auto &m = m_opt.value();
           auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
-              *m, engine->GetRenderer().GetDefaultGraphicsPipelineHandle());
+              *m, engine->GetRenderer().GetDefaultMaterialTemplateHandle());
           engine->static_mesh_manager.Update(
               static_mesh_handle,
               [render_mesh_handle](StaticMesh &mesh) -> void {
@@ -353,10 +332,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
   auto *frame_sync_counter = job_manager->AllocateCounter(2);
   auto *job = job_manager->AcquireJob();
   job->execute = [](void *data) {
-    auto *engine = static_cast<LuminaEngine *>(data);
-    UpdateUniformBuffer(engine->renderer->GetFrameContextForUpdate()
-                            ->GetUniformBuffer()
-                            .mapped);
+    renderer::UpdateFrameUniforms(*static_cast<LuminaEngine *>(data));
   };
   job->data = this;
   job->signal_counter = frame_sync_counter;
@@ -387,6 +363,11 @@ auto LuminaEngine::ExecuteFrame() -> void {
                   engine->renderer->GetDefaultMaterialInstanceHandle(),
               .model = transform.GetModelMatrix()});
           if (engine->show_bounding_boxes) {
+            auto aabb_mesh_opt = engine->static_mesh_manager.Get(
+                engine->debug_aabb_mesh_handle);
+            if (!aabb_mesh_opt.has_value()) {
+              return;
+            }
             auto world_aabb = TransformAABoundingBox(
                 mesh->bounding_box, transform.GetModelMatrix());
             math::Vec3 center{
@@ -401,6 +382,8 @@ auto LuminaEngine::ExecuteFrame() -> void {
             };
             frame_context->draw_list.emplace_back(
                 renderer::DrawDebugAABBCommand{
+                    .render_mesh_handle =
+                        aabb_mesh_opt.value()->render_mesh_handle,
                     .model = math::Dot(math::ScaleMatrix(size),
                                        math::TranslationMatrix(center))});
           }

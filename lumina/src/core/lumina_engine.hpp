@@ -8,8 +8,6 @@
 #include "debug_overlay_controller.hpp"
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
-#include "math/matrix.hpp"
-
 #include "camera_movement_controller.hpp"
 #include "input/input_dispatcher.hpp"
 #include "input/input_state.hpp"
@@ -18,6 +16,14 @@
 #include "static_mesh.hpp"
 #include "window_dimensions.hpp"
 #include "world.hpp"
+
+namespace lumina::core {
+class LuminaEngine;
+} // namespace lumina::core
+
+namespace lumina::renderer {
+auto UpdateFrameUniforms(lumina::core::LuminaEngine &engine) -> void;
+} // namespace lumina::renderer
 
 namespace lumina::core {
 
@@ -29,21 +35,6 @@ struct LuminaInitializeInfo {
 struct FrameTimeInfo {
   f64 delta_time;
   f64 total_time;
-};
-
-struct PointLight {
-  alignas(16) math::Vec3 position;
-  f32 intensity = 0.0F;
-  alignas(16) math::Vec3 color;
-  f32 attenuation_radius = 0.0F;
-};
-
-struct UniformBufferObject {
-  math::Mat4 view;
-  math::Mat4 proj;
-  PointLight point_lights[16];
-  math::Vec3 camera_position;
-  u32 point_light_count = 0;
 };
 
 class LuminaEngine {
@@ -144,6 +135,8 @@ private:
 
   auto ProcessDeferredOperations() -> void;
 
+  friend auto renderer::UpdateFrameUniforms(LuminaEngine &engine) -> void;
+
   bool is_initialized = false;
 
   bool trap_cursor = false;
@@ -165,6 +158,7 @@ private:
   std::unique_ptr<World> current_world;
 
   StaticMeshManager static_mesh_manager;
+  StaticMeshHandle debug_aabb_mesh_handle;
 };
 
 } // namespace lumina::core

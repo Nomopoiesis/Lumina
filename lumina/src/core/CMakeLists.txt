@@ -13,6 +13,9 @@ target_sources(
           bounding_box.cpp
           debug_overlay_controller.cpp)
 
+# Uniform interface
+target_sources(lumina_core PRIVATE uniform_interface/uniform_interface.cpp)
+
 # Job system
 target_sources(lumina_core PRIVATE job_system/job_manager.cpp)
 
@@ -22,7 +25,8 @@ target_sources(lumina_core PRIVATE input/input_state.cpp input/input_action.cpp
 
 target_include_directories(
   lumina_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                     $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>)
+                     $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>
+                     ${CMAKE_SOURCE_DIR}/lumina/data/static/shaders/interfaces)
 
 target_link_libraries(
   lumina_core PRIVATE lumina_common lumina_platform_common lumina_renderer
