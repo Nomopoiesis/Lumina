@@ -6,6 +6,7 @@ auto EntityManager::CreateEntity() -> EntityID {
   EntityID id{};
   if (free_indices.empty()) {
     id.index = next_index++;
+    entities.emplace_back();
   } else {
     id.index = free_indices.back();
     free_indices.pop_back();
@@ -16,6 +17,10 @@ auto EntityManager::CreateEntity() -> EntityID {
 }
 
 auto EntityManager::DestroyEntity(EntityID id) -> void {
+  if (id.index >= entities.size() ||
+      entities[id.index].generation != id.generation) {
+    return;
+  }
   entities[id.index].generation++;
   free_indices.push_back(id.index);
 }

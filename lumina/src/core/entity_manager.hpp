@@ -28,7 +28,8 @@ private:
     Entity entity;
   };
 
-  GenerationalEntry entities[1024];
+  // Grows on demand - entities.size() always tracks next_index.
+  std::vector<GenerationalEntry> entities;
   std::vector<EntityIndexType> free_indices;
   EntityIndexType next_index = 0;
 };

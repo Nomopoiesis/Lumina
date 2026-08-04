@@ -1,10 +1,13 @@
 #pragma once
 
+#include "common/lumina_assert.hpp"
 #include "core/engine_coordinates.hpp"
 #include "math/quaternion.hpp"
 #include "math/vector.hpp"
 
 #include "component_storage.hpp"
+
+#include <vector>
 
 namespace lumina::core::components {
 
@@ -90,7 +93,7 @@ inline auto CalculateViewMatrix(const Transform &transform) -> math::Mat4 {
 }
 
 template <>
-class ComponentStorage<Transform> {
+class ComponentStorage<Transform> : public IComponentStorage {
 public:
   ComponentStorage() = default;
   ComponentStorage(const ComponentStorage &other) = delete;
@@ -98,7 +101,7 @@ public:
   auto operator=(const ComponentStorage &other) -> ComponentStorage & = delete;
   auto operator=(ComponentStorage &&other) noexcept
       -> ComponentStorage & = delete;
-  ~ComponentStorage() = default;
+  ~ComponentStorage() override = default;
 
   auto Create(EntityID id, const math::Vec3 &position,
               const math::Vec3 &rotation, const math::Vec3 &scale) -> void;
@@ -107,18 +110,25 @@ public:
   auto Get(EntityID id) -> Transform;
   auto Set(EntityID id, const Transform &component) -> void;
 
+  auto Destroy(EntityID id) -> void override;
+  [[nodiscard]] auto Has(EntityID id) const -> bool override;
+
 private:
-  // SOA layout
-  f32 pos_x[1024]{};
-  f32 pos_y[1024]{};
-  f32 pos_z[1024]{};
-  f32 rot_x[1024]{};
-  f32 rot_y[1024]{};
-  f32 rot_z[1024]{};
-  f32 scale_x[1024]{};
-  f32 scale_y[1024]{};
-  f32 scale_z[1024]{};
-  size_t last_index = 0;
+  // SOA layout - parallel arrays, one entry per registered entity.
+  // Kept dense: Destroy swaps the last entry into the freed slot, so an
+  // entity's index is stable only until some other entity is destroyed.
+  std::vector<f32> pos_x;
+  std::vector<f32> pos_y;
+  std::vector<f32> pos_z;
+  std::vector<f32> rot_x;
+  std::vector<f32> rot_y;
+  std::vector<f32> rot_z;
+  std::vector<f32> scale_x;
+  std::vector<f32> scale_y;
+  std::vector<f32> scale_z;
+  // Reverse of entity_to_index, needed to repoint the entity that gets moved
+  // into a freed slot by Destroy's swap-and-pop.
+  std::vector<EntityID> index_to_entity;
   std::unordered_map<EntityID, size_t> entity_to_index;
 };
 
@@ -127,37 +137,34 @@ inline auto ComponentStorage<Transform>::Create(EntityID id,
                                                 const math::Vec3 &rotation,
                                                 const math::Vec3 &scale)
     -> void {
-  auto index = last_index++;
-  pos_x[index] = position.x;
-  pos_y[index] = position.y;
-  pos_z[index] = position.z;
-  rot_x[index] = rotation.x;
-  rot_y[index] = rotation.y;
-  rot_z[index] = rotation.z;
-  scale_x[index] = scale.x;
-  scale_y[index] = scale.y;
-  scale_z[index] = scale.z;
+  auto index = pos_x.size();
+  pos_x.push_back(position.x);
+  pos_y.push_back(position.y);
+  pos_z.push_back(position.z);
+  rot_x.push_back(rotation.x);
+  rot_y.push_back(rotation.y);
+  rot_z.push_back(rotation.z);
+  scale_x.push_back(scale.x);
+  scale_y.push_back(scale.y);
+  scale_z.push_back(scale.z);
+  index_to_entity.push_back(id);
   entity_to_index[id] = index;
 }
 
 inline auto ComponentStorage<Transform>::Create(EntityID id,
                                                 const Transform &transform)
     -> void {
-  auto index = last_index++;
-  pos_x[index] = transform.position.x;
-  pos_y[index] = transform.position.y;
-  pos_z[index] = transform.position.z;
-  rot_x[index] = transform.rotation.x;
-  rot_y[index] = transform.rotation.y;
-  rot_z[index] = transform.rotation.z;
-  scale_x[index] = transform.scale.x;
-  scale_y[index] = transform.scale.y;
-  scale_z[index] = transform.scale.z;
-  entity_to_index[id] = index;
+  Create(id, transform.position, transform.rotation, transform.scale);
 }
 
 inline auto ComponentStorage<Transform>::Get(EntityID id) -> Transform {
-  auto index = entity_to_index[id];
+  auto entry = entity_to_index.find(id);
+  ASSERT(entry != entity_to_index.end(),
+         "No transform component registered for this entity");
+  if (entry == entity_to_index.end()) {
+    return {};
+  }
+  auto index = entry->second;
   return {math::Vec3(pos_x[index], pos_y[index], pos_z[index]),
           math::Vec3(rot_x[index], rot_y[index], rot_z[index]),
           math::Vec3(scale_x[index], scale_y[index], scale_z[index])};
@@ -166,7 +173,13 @@ inline auto ComponentStorage<Transform>::Get(EntityID id) -> Transform {
 inline auto ComponentStorage<Transform>::Set(EntityID id,
                                              const Transform &component)
     -> void {
-  auto index = entity_to_index[id];
+  auto entry = entity_to_index.find(id);
+  ASSERT(entry != entity_to_index.end(),
+         "No transform component registered for this entity");
+  if (entry == entity_to_index.end()) {
+    return;
+  }
+  auto index = entry->second;
   pos_x[index] = component.position.x;
   pos_y[index] = component.position.y;
   pos_z[index] = component.position.z;
@@ -176,6 +189,50 @@ inline auto ComponentStorage<Transform>::Set(EntityID id,
   scale_x[index] = component.scale.x;
   scale_y[index] = component.scale.y;
   scale_z[index] = component.scale.z;
+}
+
+inline auto ComponentStorage<Transform>::Destroy(EntityID id) -> void {
+  auto entry = entity_to_index.find(id);
+  if (entry == entity_to_index.end()) {
+    return;
+  }
+
+  const auto index = entry->second;
+  const auto last = pos_x.size() - 1;
+
+  // Swap-and-pop so the arrays stay dense for linear scans, then repoint the
+  // entity that owned the entry we moved.
+  if (index != last) {
+    pos_x[index] = pos_x[last];
+    pos_y[index] = pos_y[last];
+    pos_z[index] = pos_z[last];
+    rot_x[index] = rot_x[last];
+    rot_y[index] = rot_y[last];
+    rot_z[index] = rot_z[last];
+    scale_x[index] = scale_x[last];
+    scale_y[index] = scale_y[last];
+    scale_z[index] = scale_z[last];
+
+    const auto moved_entity = index_to_entity[last];
+    index_to_entity[index] = moved_entity;
+    entity_to_index[moved_entity] = index;
+  }
+
+  pos_x.pop_back();
+  pos_y.pop_back();
+  pos_z.pop_back();
+  rot_x.pop_back();
+  rot_y.pop_back();
+  rot_z.pop_back();
+  scale_x.pop_back();
+  scale_y.pop_back();
+  scale_z.pop_back();
+  index_to_entity.pop_back();
+  entity_to_index.erase(id);
+}
+
+inline auto ComponentStorage<Transform>::Has(EntityID id) const -> bool {
+  return entity_to_index.contains(id);
 }
 
 } // namespace lumina::core::components

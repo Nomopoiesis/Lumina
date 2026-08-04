@@ -187,6 +187,12 @@ static auto BuildUIBatch(Clay_RenderCommandArray commands, UISystem &ui_system,
   flush_draw_call();
 }
 
+// Number of test entities populated into the default world. Raise this to
+// stress the render path - entity/transform storage grows on demand, so the
+// only practical limit is frame time (there is no culling yet).
+static constexpr u32 DEBUG_SPAWN_MESH_COUNT = 5000;
+static constexpr f32 DEBUG_SPAWN_RADIUS = 50.0F;
+
 static auto SpawnMeshEntities(World &world, u32 count,
                               StaticMeshHandle mesh_handle,
                               const math::Vec3 &origin, f32 radius) -> void {
@@ -435,8 +441,8 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                                 math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
-  SpawnMeshEntities(world, 100, static_mesh_handle,
-                    math::Vec3{0.0F, 0.0F, 0.0F}, 50.0F);
+  SpawnMeshEntities(world, DEBUG_SPAWN_MESH_COUNT, static_mesh_handle,
+                    math::Vec3{0.0F, 0.0F, 0.0F}, DEBUG_SPAWN_RADIUS);
 
   entity_id = world.CreateEntity();
   world.AddComponent<LightComponent>(

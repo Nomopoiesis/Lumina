@@ -100,6 +100,10 @@ public:
     return is_shutdown_requested_;
   }
 
+  [[nodiscard]] auto GetWorkerCount() const -> size_t {
+    return worker_contexts.size();
+  }
+
   [[nodiscard]] auto StealFromOtherWorker(size_t thief_index, Job *&job)
       -> bool;
 

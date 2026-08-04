@@ -77,7 +77,11 @@ private:
   auto UpdateInternal(ResourceHandle<T> handle, UpdateData &update_data)
       -> void;
 
-  ResourceEntry resources[1024];
+  // Entries are assets (meshes, textures, pipelines, material instances), not
+  // per-entity instances, so this cap is independent of the entity count.
+  static constexpr ResourceHandleIndexType MAX_RESOURCES = 1024;
+
+  ResourceEntry resources[MAX_RESOURCES];
   std::vector<ResourceHandleIndexType> free_indices;
   std::atomic<ResourceHandleIndexType> next_index{0};
 
@@ -108,6 +112,7 @@ auto ResourceManager<T>::Create() -> ResourceHandle<T> {
   } else {
     index = next_index.fetch_add(1);
   }
+  ASSERT(index < MAX_RESOURCES, "ResourceManager capacity exceeded");
   ResourceHandle<T> handle{index, resources[index].generation};
   create_queue.Push(handle);
   return handle;

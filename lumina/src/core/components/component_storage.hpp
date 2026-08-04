@@ -1,13 +1,47 @@
 #pragma once
 
+#include "common/lumina_assert.hpp"
 #include "core/entity.hpp"
 
+#include <atomic>
 #include <unordered_map>
 
 namespace lumina::core::components {
 
+// Type-erased view of a component storage, so World can drop every component
+// belonging to an entity without knowing which component types exist.
+// Only the destroy path is virtual - component access goes through the
+// concrete storage type and stays a direct call.
+class IComponentStorage {
+public:
+  IComponentStorage() = default;
+  IComponentStorage(const IComponentStorage &) = delete;
+  IComponentStorage(IComponentStorage &&) noexcept = delete;
+  auto operator=(const IComponentStorage &) -> IComponentStorage & = delete;
+  auto operator=(IComponentStorage &&) noexcept -> IComponentStorage & = delete;
+  virtual ~IComponentStorage() = default;
+
+  // Removes this entity's component if present, no-op otherwise.
+  // Not safe to call while iterating the same storage with ForEach.
+  virtual auto Destroy(EntityID id) -> void = 0;
+  [[nodiscard]] virtual auto Has(EntityID id) const -> bool = 0;
+};
+
+// Dense index assigned to each component type on first use, used to slot
+// storages into World's registry.
+[[nodiscard]] inline auto NextComponentTypeIndex() -> size_t {
+  static std::atomic<size_t> next_index{0};
+  return next_index.fetch_add(1, std::memory_order_relaxed);
+}
+
 template <typename T>
-class ComponentStorage {
+[[nodiscard]] auto ComponentTypeIndex() -> size_t {
+  static const size_t index = NextComponentTypeIndex();
+  return index;
+}
+
+template <typename T>
+class ComponentStorage : public IComponentStorage {
 public:
   ComponentStorage() = default;
   ComponentStorage(const ComponentStorage &other) = delete;
@@ -15,13 +49,16 @@ public:
   auto operator=(const ComponentStorage &other) -> ComponentStorage & = delete;
   auto operator=(ComponentStorage &&other) noexcept
       -> ComponentStorage & = delete;
-  ~ComponentStorage() = default;
+  ~ComponentStorage() override = default;
 
   template <typename... Args>
   auto Create(EntityID id, Args &&...args) -> void;
 
   auto Get(EntityID id) -> T;
   auto Set(EntityID id, const T &component) -> void;
+
+  auto Destroy(EntityID id) -> void override;
+  [[nodiscard]] auto Has(EntityID id) const -> bool override;
 
   template <typename Func>
   auto ForEach(Func &&func) -> void;
@@ -41,12 +78,30 @@ auto ComponentStorage<T>::Create(EntityID id, Args &&...args) -> void {
 
 template <typename T>
 auto ComponentStorage<T>::Get(EntityID id) -> T {
-  return data_[id];
+  // find rather than operator[], which would resurrect a destroyed component
+  // as a default-constructed entry.
+  auto entry = data_.find(id);
+  ASSERT(entry != data_.end(),
+         "No component of this type registered for entity");
+  if (entry == data_.end()) {
+    return T{};
+  }
+  return entry->second;
 }
 
 template <typename T>
 auto ComponentStorage<T>::Set(EntityID id, const T &component) -> void {
   data_[id] = component;
+}
+
+template <typename T>
+auto ComponentStorage<T>::Destroy(EntityID id) -> void {
+  data_.erase(id);
+}
+
+template <typename T>
+auto ComponentStorage<T>::Has(EntityID id) const -> bool {
+  return data_.contains(id);
 }
 
 template <typename T>

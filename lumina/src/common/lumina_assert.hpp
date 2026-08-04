@@ -11,7 +11,7 @@
     *crash = 0;                                                                \
   }
 #else
-#define ASSERT(Expression)
+#define ASSERT(Expression, ...) ((void)0)
 #endif
 
 // Debug break
