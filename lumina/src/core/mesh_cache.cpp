@@ -2,12 +2,15 @@
 
 #include "common/data_structures/data_buffer.hpp"
 #include "common/logger/logger.hpp"
+#include "platform/platform_common/file_handle.hpp"
 
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 namespace lumina::core {
+
+using lumina::platform::common::FileHandle;
+using lumina::platform::common::InvalidFileHandle;
 
 // Binary format (little-endian):
 //   [4]  magic: 'L','M','S','H'
@@ -20,6 +23,8 @@ namespace lumina::core {
 //     [1]  ElementType (u8)
 //     [8]  data_byte_count: u64
 //     [N]  raw attribute bytes
+//   [12] Vec3[float, float, float] - bounding box min
+//   [12] Vec3[float, float, float] - bounding box max
 //   [index_count * 2]  u16 index array
 
 namespace {
@@ -49,10 +54,10 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
     return std::unexpected(MeshCacheError{"failed to create cache directory"});
   }
 
-  auto *file_handle =
+  auto file_handle =
       platform::common::PlatformServices::Instance().LuminaCreateFile(
           path.string().c_str());
-  if (file_handle == nullptr) {
+  if (file_handle == InvalidFileHandle) {
     LOG_ERROR("mesh_cache: failed to open file for writing: %s",
               path.string().c_str());
     return std::unexpected(
@@ -78,12 +83,18 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
   for (const auto &[attr, data] : mesh.vertex_attributes) {
     const auto attr_type = static_cast<u8>(attr.type);
     const auto elem_type = static_cast<u8>(attr.element_type);
-    const auto byte_count = static_cast<u64>(data.size());
+    const auto byte_count = static_cast<u64>(data.Size());
     write(&attr_type, sizeof(attr_type));
     write(&elem_type, sizeof(elem_type));
     write(&byte_count, sizeof(byte_count));
-    write(data.data(), static_cast<std::streamsize>(byte_count));
+    write(data.Data(), static_cast<std::streamsize>(byte_count));
   }
+
+  // AABB is stored explicitly so loaders don't need to scan vertex positions.
+  static_assert(sizeof(math::Vec3) == 12,
+                "AABB cache layout expects packed Vec3");
+  write(&mesh.bounding_box.min, sizeof(mesh.bounding_box.min));
+  write(&mesh.bounding_box.max, sizeof(mesh.bounding_box.max));
 
   write(mesh.indices.data(),
         static_cast<std::streamsize>(mesh.indices.size() * sizeof(u16)));
@@ -110,10 +121,10 @@ auto DeserializeStaticMesh(std::string_view cache_key,
     -> std::expected<StaticMesh, MeshCacheError> {
   const auto path = CachePath(cache_key, cache_resolver);
 
-  auto *file_handle =
+  auto file_handle =
       platform::common::PlatformServices::Instance().LuminaOpenFile(
           path.string().c_str());
-  if (file_handle == nullptr) {
+  if (file_handle == InvalidFileHandle) {
     LOG_ERROR("mesh_cache: failed to open cache file: %s",
               path.string().c_str());
     return std::unexpected(MeshCacheError{"failed to open cache file"});
@@ -178,8 +189,8 @@ auto DeserializeStaticMesh(std::string_view cache_key,
     byte_count = data_to_read.As<u64>(offset);
     offset += sizeof(u64);
 
-    std::vector<u8> data(byte_count);
-    std::memcpy(data.data(), data_to_read.Data() + offset, byte_count);
+    DataBuffer data(byte_count);
+    std::memcpy(data.Data(), data_to_read.Data() + offset, byte_count);
     offset += byte_count;
 
     mesh.vertex_attributes.emplace_back(
@@ -187,6 +198,11 @@ auto DeserializeStaticMesh(std::string_view cache_key,
                         .element_type = static_cast<ElementType>(elem_type)},
         std::move(data));
   }
+
+  mesh.bounding_box.min = data_to_read.As<math::Vec3>(offset);
+  offset += sizeof(math::Vec3);
+  mesh.bounding_box.max = data_to_read.As<math::Vec3>(offset);
+  offset += sizeof(math::Vec3);
 
   mesh.indices.resize(index_count);
   std::memcpy(mesh.indices.data(), data_to_read.Data() + offset,

@@ -1,12 +1,15 @@
 #pragma once
 
 #include "log_target.hpp"
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/file_handle.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include <mutex>
 #include <string>
 
 namespace lumina::common::logger {
+
+using lumina::platform::common::InvalidFileHandle;
 
 // File log target implementation
 // Writes log messages to a file using platform-specific file operations
@@ -30,9 +33,13 @@ public:
   // Thread-safe: protected by mutex
   auto Write(LogLevel level, const std::string &message) -> void override;
 
+  [[nodiscard]] auto IsValid() const -> bool override {
+    return file_handle_ != InvalidFileHandle;
+  }
+
 private:
   lumina::platform::common::PlatformServices &platform_services_;
-  void *file_handle_;
+  lumina::platform::common::FileHandle file_handle_;
   std::mutex write_mutex_;
 };
 

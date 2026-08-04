@@ -1,7 +1,8 @@
 #pragma once
 
+#include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
-#include "core/lumina_engine.hpp"
+#include "core/window_dimensions.hpp"
 #include "lumina_types.hpp"
 
 #include <expected>

@@ -19,7 +19,8 @@ target_sources(
           ui_renderer.cpp
           shaders/shader_module_cache.cpp
           shaders/shader_interface.cpp
-          shaders/shader_gen/static_shader_api.cpp)
+          shaders/shader_gen/static_shader_api.cpp
+          ${CMAKE_CURRENT_SOURCE_DIR}/../core/vertex_attribute.cpp)
 
 target_link_libraries(lumina_renderer
                       PRIVATE lumina_common lumina_common_terminate lumina_stb

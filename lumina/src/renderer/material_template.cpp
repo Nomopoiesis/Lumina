@@ -9,7 +9,7 @@ namespace lumina::renderer {
 
 auto MaterialTemplate::Create(const std::string &vertex_shader_bin_path,
                               const std::string &fragment_shader_bin_path,
-                              ShaderInterface &shader_interface)
+                              size_t shader_interface_index)
     -> std::expected<MaterialTemplate, MaterialTemplateCreateError> {
   if (vertex_shader_bin_path.empty() || fragment_shader_bin_path.empty()) {
     return std::unexpected(MaterialTemplateCreateError{
@@ -17,7 +17,7 @@ auto MaterialTemplate::Create(const std::string &vertex_shader_bin_path,
   }
 
   MaterialTemplate material_template;
-  material_template.shader_interface = &shader_interface;
+  material_template.shader_interface_index = shader_interface_index;
   material_template.vertex_shader_bin_path = vertex_shader_bin_path;
   material_template.fragment_shader_bin_path = fragment_shader_bin_path;
   return material_template;

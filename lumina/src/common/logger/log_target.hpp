@@ -30,6 +30,8 @@ public:
   // perform any final actions (e.g., keeping the console open until a key
   // is pressed).
   virtual auto OnShutdown(bool /*wait_for_keypress*/) -> void {}
+
+  [[nodiscard]] virtual auto IsValid() const -> bool = 0;
 };
 
 } // namespace lumina::common::logger

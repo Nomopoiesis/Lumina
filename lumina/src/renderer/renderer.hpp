@@ -1,7 +1,7 @@
 #pragma once
 
 #include "material_template.hpp"
-#include "platform/common/vulkan/vulkan_init_result.hpp"
+#include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "command_context.hpp"
 #include "frame_context.hpp"
@@ -101,7 +101,7 @@ public:
       -> GraphicsPipelineHandle;
 
   auto CreateRenderMesh(const core::StaticMesh &mesh,
-                        GraphicsPipelineHandle pipeline_handle)
+                        MaterialTemplateHandle material_template)
       -> RenderMeshHandle;
   auto DestroyRenderMesh(RenderMeshHandle handle) -> void;
 
@@ -115,9 +115,9 @@ public:
     return default_material_instance_handle;
   }
 
-  [[nodiscard]] auto GetDefaultGraphicsPipelineHandle() const noexcept
-      -> GraphicsPipelineHandle {
-    return default_pipeline_handle;
+  [[nodiscard]] auto GetDefaultMaterialTemplateHandle() const noexcept
+      -> MaterialTemplateHandle {
+    return default_material_template_handle;
   }
 
   [[nodiscard]] auto GetMaterialInstance(MaterialInstanceHandle handle) noexcept
@@ -143,12 +143,26 @@ public:
     default_material_template_handle = handle;
   }
 
+  auto SetDebugWireframeMaterialTemplate(MaterialTemplateHandle handle) -> void {
+    debug_wireframe_material_template_handle = handle;
+  }
+
+  [[nodiscard]] auto GetDebugWireframeMaterialTemplateHandle() const noexcept
+      -> MaterialTemplateHandle {
+    return debug_wireframe_material_template_handle;
+  }
+
   [[nodiscard]] auto GetGlobalDescriptorSetLayout() const noexcept
       -> VkDescriptorSetLayout {
     return global_descriptor_set_layout;
   }
 
 private:
+  [[nodiscard]] auto GetShaderInterfaceFor(const MaterialTemplate &tmpl)
+      -> ShaderInterface & {
+    return shader_interfaces[tmpl.GetShaderInterfaceIndex()];
+  }
+
   auto RenderThread() -> void;
 
   auto AcquireFrameContextForRender() -> void;
@@ -226,8 +240,10 @@ private:
   size_t max_persistent_descriptor_sets = 0;
 
   MaterialTemplateHandle default_material_template_handle;
+  MaterialTemplateHandle debug_wireframe_material_template_handle;
   MaterialInstanceHandle default_material_instance_handle;
   GraphicsPipelineHandle default_pipeline_handle;
+  GraphicsPipelineHandle debug_aabb_pipeline_handle;
 
   UIRenderer ui_renderer;
 

@@ -10,8 +10,8 @@
 #include "common/logger/logger.hpp"
 #include "common/path_registry.hpp"
 #include "common/timer.hpp"
-#include "platform/common/platform_services.hpp"
-#include "platform/common/runtime_root.hpp"
+#include "platform/platform_common/platform_services.hpp"
+#include "platform/platform_common/runtime_root.hpp"
 #include "win_platform_services.hpp"
 
 auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,

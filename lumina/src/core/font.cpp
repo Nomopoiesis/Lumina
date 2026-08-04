@@ -4,7 +4,7 @@
 #include "common/lumina_assert.hpp"
 #include "common/path_registry.hpp"
 
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include <vector>
 
@@ -27,7 +27,7 @@ auto CreateFont(const std::string &name, std::span<const i32> sizes)
         FontCreateError{.message = "Font file not found: " + name});
   }
 
-  auto *file_handle =
+  auto file_handle =
       platform::common::PlatformServices::Instance().LuminaOpenFile(
           font_path.string().c_str());
   auto file_size =

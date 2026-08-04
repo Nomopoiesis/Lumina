@@ -10,12 +10,15 @@
 #include <Windows.h>
 #endif
 
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/file_handle.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include "lumina_assert.hpp"
 #include "scope_guard.hpp"
 
 namespace lumina::renderer {
+
+using lumina::platform::common::InvalidFileHandle;
 
 ShaderModuleCache::ShaderModuleCache(VkDevice device_) noexcept
     : device(device_) {}
@@ -55,10 +58,10 @@ auto ShaderModuleCache::CreateShaderModule(const std::string &file_path,
     -> std::expected<VkShaderModule, ShaderLoadError> {
   // Read file content
   std::vector<u8> file_data;
-  void *file_handle =
+  auto file_handle =
       platform::common::PlatformServices::Instance().LuminaOpenFile(
           file_path.c_str());
-  if (file_handle == nullptr) {
+  if (file_handle == InvalidFileHandle) {
     return std::unexpected(
         ShaderLoadError{.message = "Failed to open file: " + file_path});
   } else {

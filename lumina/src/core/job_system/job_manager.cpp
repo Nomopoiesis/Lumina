@@ -6,7 +6,7 @@
 #include "common/lumina_util.hpp"
 #include "lumina_assert.hpp"
 #include "lumina_types.hpp"
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include <thread>
 
@@ -44,6 +44,13 @@ auto JobManager::Initialize(JobManagerInitializeInfo initialize_info) -> void {
         std::thread(&JobManager::WorkerEntryPoint, worker_contexts[i].get());
   }
 
+  // Pin threads from the main thread after all std::thread objects are fully
+  // constructed.
+  for (size_t i = 0; i < initialize_info.num_workers; ++i) {
+    platform::common::PlatformServices::Instance().LuminaPinThread(
+        worker_contexts[i]->thread_handle.native_handle(), i);
+  }
+
   is_initialized_ = true;
 }
 auto JobManager::Shutdown() -> void {
@@ -62,9 +69,6 @@ auto JobManager::WorkerEntryPoint(WorkerContext *worker_context) -> void {
   local_worker_context = worker_context;
   platform::common::PlatformServices::Instance().LuminaSetThreadName(
       std::format("JM_Worker_{}", worker_context->worker_index).c_str());
-  platform::common::PlatformServices::Instance().LuminaPinThread(
-      worker_context->thread_handle.native_handle(),
-      worker_context->worker_index);
   worker_context->master_fiber =
       platform::common::PlatformServices::Instance().LuminaConvertThreadToFiber(
           worker_context);
@@ -209,9 +213,9 @@ auto JobManager::SubmitJob(Job *job) -> void {
   }
 
   // We are an external thread (main, render, etc.). Push to a worker's external
-  // job queue via round-robin. The external queue is safe for multiple producers
-  // and will be drained into the worker's work-stealing deque, making the job
-  // stealable by other workers.
+  // job queue via round-robin. The external queue is safe for multiple
+  // producers and will be drained into the worker's work-stealing deque, making
+  // the job stealable by other workers.
   auto worker_index =
       round_robin_index.fetch_add(1, std::memory_order_relaxed) %
       worker_contexts.size();

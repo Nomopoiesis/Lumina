@@ -8,6 +8,8 @@ target_include_directories(
   windows_lumina PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
                         $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>)
 
+add_compile_definitions(VK_USE_PLATFORM_WIN32_KHR=1)
+
 # Windows-specific settings Set subsystem to Windows (not console)
 set_target_properties(windows_lumina PROPERTIES WIN32_EXECUTABLE TRUE)
 # Output name (CMake will automatically add .exe on Windows)

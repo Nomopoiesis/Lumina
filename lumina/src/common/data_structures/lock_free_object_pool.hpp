@@ -34,6 +34,12 @@ public:
     capacity_ = 0;
     head.store(nullptr, std::memory_order_relaxed);
   }
+  auto Deinitialize(std::function<void(T &)> cleanup) noexcept -> void {
+    for (size_t i = 0; i < capacity_; ++i) {
+      cleanup(storage[i].object);
+    }
+    Deinitialize();
+  }
   auto Acquire() noexcept -> T *;
   auto Release(T *object) noexcept -> void;
 

@@ -2,11 +2,6 @@ CompileFlags:
   CompilationDatabase: build/Debug
   Add: 
     - -std=c++23
-    - -fms-compatibility
-    - -fms-extensions
-    - -DWIN32
-    - -D_WINDOWS
-    - -D_CRT_SECURE_NO_WARNINGS
   Remove: [-W*]
 
 Index:

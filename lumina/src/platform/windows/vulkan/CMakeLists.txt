@@ -1,8 +1,7 @@
 add_library(windows_lumina_vulkan STATIC)
 
 target_sources(
-  windows_lumina_vulkan PRIVATE win_vulkan.cpp win_vulkan_instance.cpp
-                                win_vulkan_surface.cpp)
+  windows_lumina_vulkan PRIVATE win_vulkan.cpp win_vulkan_surface.cpp)
 target_include_directories(
   windows_lumina_vulkan
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

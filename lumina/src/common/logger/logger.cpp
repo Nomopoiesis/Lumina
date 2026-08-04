@@ -2,6 +2,7 @@
 
 #include "console_target.hpp"
 #include "file_target.hpp"
+#include "lumina_assert.hpp"
 #include "lumina_terminate.hpp"
 
 #include <chrono>
@@ -31,8 +32,16 @@ auto Logger::Initialize(
   // Create targets based on target_type
   if (target_type == LogTargetType::Console ||
       target_type == LogTargetType::Both) {
-    logger.targets_.push_back(std::make_unique<ConsoleTarget>(
-        platform_services, enable_console_colors));
+    auto console_target = std::make_unique<ConsoleTarget>(
+        platform_services, enable_console_colors);
+    if (console_target->IsValid()) {
+      logger.targets_.push_back(std::move(console_target));
+    } else {
+      std::print("Failed to create console log target, console logging will be "
+                 "disabled");
+      ASSERT(false, "In debug mode -> Failed to create log target (log target "
+                    "is asserted in debug mode)");
+    }
   }
 
   if (target_type == LogTargetType::File ||

@@ -3,6 +3,8 @@
 #include "lumina_util.hpp"
 #include "win_input_map.hpp"
 
+#include "core/lumina_engine.hpp"
+
 #include <windowsx.h> // GET_X_LPARAM, GET_Y_LPARAM, GET_WHEEL_DELTA_WPARAM
 
 namespace lumina::platform::windows {

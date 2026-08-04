@@ -5,7 +5,6 @@
 #include "common/lumina_assert.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/path_registry.hpp"
-#include "core/lumina_engine.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
@@ -447,8 +446,7 @@ auto LuminaRenderer::CreateDescriptorPools()
 
 static auto CreateUniformBuffer(VulkanContext &vulkan_context,
                                 VkDeviceMemory &memory, VkBuffer &buffer,
-                                void *&mapped_data) -> bool {
-  VkDeviceSize size = sizeof(core::UniformBufferObject);
+                                void *&mapped_data, VkDeviceSize size) -> bool {
   if (!CreateBuffer(vulkan_context, size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                     VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
@@ -980,9 +978,9 @@ auto LuminaRenderer::Initialize() -> void {
     }
     frame_contexts.push_back(std::move(frame_context_result.value()));
     auto &uniform_buffer = frame_contexts[i]->GetUniformBuffer();
-    auto uniform_buffer_result =
-        CreateUniformBuffer(vulkan_context, uniform_buffer.memory,
-                            uniform_buffer.buffer, uniform_buffer.mapped);
+    auto uniform_buffer_result = CreateUniformBuffer(
+        vulkan_context, uniform_buffer.memory, uniform_buffer.buffer,
+        uniform_buffer.mapped, GetFrameGlobalsBufferSize());
     ASSERT(uniform_buffer_result, "Failed to create uniform buffer");
   }
 
@@ -1030,6 +1028,15 @@ auto LuminaRenderer::Initialize() -> void {
     ProcessDeferredOperations();
   }
 
+  debug_aabb_pipeline_handle = CreateGraphicsPipeline(
+      {.vertex_layout = VertexBufferLayout::Interleave(
+           std::span<const core::VertexAttribute>({core::VertexAttribute{
+               .type = core::VertexAttributeType::Position,
+               .element_type = core::ElementType::Vec3}})),
+       .material_template = debug_wireframe_material_template_handle,
+       .topology = PrimitiveTopology::LineList});
+  ProcessDeferredOperations();
+
   ui_renderer.Initialize(vulkan_context,
                          lumina::common::PathRegistry::Instance()
                              .shaders.Resolve("ui.vert.spv")
@@ -1044,7 +1051,7 @@ auto LuminaRenderer::Initialize() -> void {
 
 auto LuminaRenderer::Shutdown() -> void {
   shutdown_requested = true;
-  render_thread.join();  // GPU is idle when this returns
+  render_thread.join(); // GPU is idle when this returns
   ui_renderer.Shutdown(vulkan_context);
 }
 
@@ -1338,11 +1345,10 @@ auto LuminaRenderer::AllocatePersistentDescriptorSets(
   }
   auto &tmpl = tmpl_opt.value();
   auto *device = vulkan_context.GetDevice();
-  const auto *interface = tmpl->GetShaderInterface();
-  ASSERT(interface != nullptr, "MaterialTemplate has no ShaderInterface");
+  auto &interface = GetShaderInterfaceFor(*tmpl);
 
   // Get the descriptor set layout for set 1 (per-material).
-  auto *dsl = interface->GetDescriptorSetLayout(1);
+  auto *dsl = interface.GetDescriptorSetLayout(1);
   if (dsl == VK_NULL_HANDLE) {
     LOG_WARNING("No descriptor set layout for set 1 — material has no "
                 "persistent bindings");
@@ -1435,10 +1441,9 @@ auto LuminaRenderer::AccumulateDescriptorBudget(const ShaderLayout &vert_layout,
 
 auto LuminaRenderer::CreateMaterialTemplate(
     const MaterialTemplateDescription &desc) -> MaterialTemplateHandle {
-  auto &shader_interface = shader_interfaces[desc.shader_interface_index];
-  auto material_template_result =
-      MaterialTemplate::Create(desc.vertex_shader_bin_path,
-                               desc.fragment_shader_bin_path, shader_interface);
+  auto material_template_result = MaterialTemplate::Create(
+      desc.vertex_shader_bin_path, desc.fragment_shader_bin_path,
+      desc.shader_interface_index);
   if (!material_template_result) {
     LOG_CRITICAL("Failed to create material template: {}",
                  material_template_result.error().message);
@@ -1476,6 +1481,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
     LUMINA_TERMINATE();
   }
   auto &material_template = material_template_opt.value();
+  auto &shader_interface = GetShaderInterfaceFor(*material_template);
   ShaderModuleCache shader_module_cache(vulkan_context.GetDevice());
 
   auto vert_module_result = shader_module_cache.GetShaderModule(
@@ -1520,8 +1526,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
 
   auto binding_descriptions = ToVkBindingDescriptions(desc.vertex_layout);
   auto attribute_descriptions = ToVkAttributeDescriptions(
-      desc.vertex_layout,
-      material_template->GetShaderInterface()->GetVertexInputLayout());
+      desc.vertex_layout, shader_interface.GetVertexInputLayout());
 
   VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -1539,7 +1544,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
       .pNext = nullptr,
       .flags = 0,
-      .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+      .topology = ToVkPrimitiveTopology(desc.topology),
       .primitiveRestartEnable = VK_FALSE,
   };
 
@@ -1637,7 +1642,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       .pDepthStencilState = &depth_stencil_state_create_info,
       .pColorBlendState = &color_blend_state_create_info,
       .pDynamicState = &dynamic_state_create_info,
-      .layout = material_template->GetShaderInterface()->GetPipelineLayout(),
+      .layout = shader_interface.GetPipelineLayout(),
       .renderPass = VK_NULL_HANDLE,
       .subpass = 0,
       .basePipelineHandle = VK_NULL_HANDLE,
@@ -1655,6 +1660,7 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
     LUMINA_TERMINATE();
   }
 
+  gfx_pipeline.topology = desc.topology;
   auto handle = pipeline_manager.Create(std::move(gfx_pipeline));
   return handle;
 }
@@ -1777,49 +1783,93 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
       command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, global_pipeline_layout,
       0, 1, &frame_context.GetTransientDescriptorSet(), 0, nullptr);
 
-  for (const auto &draw_mesh_info : frame_context.render_draw_list) {
-    auto handle = draw_mesh_info.render_mesh_handle;
-    auto model = draw_mesh_info.model;
-    auto render_mesh_opt = render_mesh_manager.Get(handle);
-    if (!render_mesh_opt.has_value() || !render_mesh_opt.value()->ready) {
-      continue;
-    }
-    const auto &render_mesh = render_mesh_opt.value();
-    auto pipeline_opt = pipeline_manager.Get(render_mesh->pipeline_handle);
-    if (!pipeline_opt.has_value()) {
-      continue;
-    }
-    auto &pipeline = pipeline_opt.value();
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      pipeline->vk_pipeline);
-    auto material_instance_opt =
-        material_instance_manager.Get(draw_mesh_info.material_instance);
-    if (!material_instance_opt.has_value()) {
-      continue;
-    }
-    auto &material_instance = material_instance_opt.value();
-    auto material_template_opt =
-        material_template_manager.Get(material_instance->GetTemplateHandle());
-    if (!material_template_opt.has_value()) {
-      continue;
-    }
-    auto &material_template = material_template_opt.value();
-    vkCmdBindDescriptorSets(
-        command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        material_template->GetShaderInterface()->GetPipelineLayout(), 1, 1,
-        &material_instance->GetDescriptorSet(current_frame_index), 0, nullptr);
+  for (const auto &draw_command : frame_context.draw_list) {
+    std::visit(
+        [&](const auto &cmd) {
+          using T = std::decay_t<decltype(cmd)>;
 
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(command_buffer, 0, 1,
-                           &render_mesh->vertex_streams[0].buffer, offsets);
-    vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
-                         VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(
-        command_buffer,
-        material_template->GetShaderInterface()->GetPipelineLayout(),
-        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4), &model);
-    vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh->index_count),
-                     1, 0, 0, 0);
+          if constexpr (std::is_same_v<T, DrawMeshCommand>) {
+            auto render_mesh_opt =
+                render_mesh_manager.Get(cmd.render_mesh_handle);
+            if (!render_mesh_opt.has_value() ||
+                !render_mesh_opt.value()->ready) {
+              return;
+            }
+            const auto &render_mesh = render_mesh_opt.value();
+            auto pipeline_opt =
+                pipeline_manager.Get(render_mesh->pipeline_handle);
+            if (!pipeline_opt.has_value()) {
+              return;
+            }
+            auto &pipeline = pipeline_opt.value();
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pipeline->vk_pipeline);
+            auto material_instance_opt =
+                material_instance_manager.Get(cmd.material_instance);
+            if (!material_instance_opt.has_value()) {
+              return;
+            }
+            auto &material_instance = material_instance_opt.value();
+            auto material_template_opt = material_template_manager.Get(
+                material_instance->GetTemplateHandle());
+            if (!material_template_opt.has_value()) {
+              return;
+            }
+            auto &material_template = material_template_opt.value();
+            auto &si = GetShaderInterfaceFor(*material_template);
+            vkCmdBindDescriptorSets(
+                command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                si.GetPipelineLayout(), 1, 1,
+                &material_instance->GetDescriptorSet(current_frame_index), 0,
+                nullptr);
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                                   &render_mesh->vertex_streams[0].buffer,
+                                   offsets);
+            vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
+                                 VK_INDEX_TYPE_UINT16);
+            vkCmdPushConstants(command_buffer, si.GetPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               sizeof(math::Mat4), &cmd.model);
+            vkCmdDrawIndexed(command_buffer,
+                             static_cast<u32>(render_mesh->index_count), 1, 0,
+                             0, 0);
+
+          } else if constexpr (std::is_same_v<T, DrawDebugAABBCommand>) {
+            auto pipeline_opt =
+                pipeline_manager.Get(debug_aabb_pipeline_handle);
+            auto render_mesh_opt =
+                render_mesh_manager.Get(cmd.render_mesh_handle);
+            if (!pipeline_opt.has_value() || !render_mesh_opt.has_value() ||
+                !render_mesh_opt.value()->ready) {
+              return;
+            }
+            auto &pipeline = pipeline_opt.value();
+            const auto &render_mesh = render_mesh_opt.value();
+            auto material_template_opt = material_template_manager.Get(
+                debug_wireframe_material_template_handle);
+            if (!material_template_opt.has_value()) {
+              return;
+            }
+            auto &material_template = material_template_opt.value();
+            auto &dbg_si = GetShaderInterfaceFor(*material_template);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pipeline->vk_pipeline);
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                                   &render_mesh->vertex_streams[0].buffer,
+                                   offsets);
+            vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
+                                 VK_INDEX_TYPE_UINT16);
+            vkCmdPushConstants(command_buffer, dbg_si.GetPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               sizeof(math::Mat4), &cmd.model);
+            vkCmdDrawIndexed(command_buffer,
+                             static_cast<u32>(render_mesh->index_count), 1, 0,
+                             0, 0);
+          }
+        },
+        draw_command);
   }
 
   vkCmdEndRendering(command_buffer);
@@ -1836,19 +1886,26 @@ auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
 }
 
 auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
-                                      GraphicsPipelineHandle pipeline_handle)
+                                      MaterialTemplateHandle material_template)
     -> RenderMeshHandle {
-  auto pipeline_opt = pipeline_manager.Get(pipeline_handle);
-  ASSERT(pipeline_opt.has_value(),
-         "Pipeline not found for render mesh creation");
-  auto &pipeline = pipeline_opt.value();
-  const VertexBufferLayout &layout = pipeline->vertex_layout;
+  GraphicsPipelineHandle pipeline_handle;
+  const VertexBufferLayout *layout = nullptr;
+  pipeline_manager.ForEach(
+      [&](GraphicsPipelineHandle handle, GraphicsPipeline &pipeline) {
+        if (pipeline.material_template.index == material_template.index &&
+            pipeline.topology == mesh.topology) {
+          pipeline_handle = handle;
+          layout = &pipeline.vertex_layout;
+        }
+      });
+  ASSERT(layout != nullptr,
+         "No pipeline found matching material template and mesh topology");
 
   auto &cmd_ctx = AcquireCommandContext();
   cmd_ctx.Begin();
   RenderMesh render_mesh;
   render_mesh.pipeline_handle = pipeline_handle;
-  auto vertex_streams_data = SerializeVertexBuffer(mesh, layout);
+  auto vertex_streams_data = SerializeVertexBuffer(mesh, *layout);
   render_mesh.vertex_count = mesh.vertex_count;
   std::vector<VulkanBufferResources> staging_resources;
   for (const auto &[stream_stride, vertex_stream] : vertex_streams_data) {

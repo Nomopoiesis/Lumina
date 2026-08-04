@@ -12,6 +12,10 @@ auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
 auto GetGlobalDescriptorPoolSizes(std::vector<VkDescriptorPoolSize> &pool_sizes)
     -> void;
 
+// Returns sizeof(FrameGlobals) so renderer.cpp can create the buffer
+// without including the generated header.
+auto GetFrameGlobalsBufferSize() -> VkDeviceSize;
+
 // Returns sizeof(MaterialUniforms) so renderer.cpp can create the buffer
 // without including the generated header.
 auto GetDefaultMaterialUBOSize() -> VkDeviceSize;

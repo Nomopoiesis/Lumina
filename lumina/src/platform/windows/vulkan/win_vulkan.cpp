@@ -1,19 +1,32 @@
 #include "win_vulkan.hpp"
 
-#include "win_vulkan_instance.hpp"
 #include "win_vulkan_surface.hpp"
 
-#include "common/vulkan/vulkan_debug_callback.hpp"
+#include "platform/platform_common/vulkan/vulkan_debug_callback.hpp"
+#include "platform/platform_common/vulkan/vulkan_instance.hpp"
 
 #include <vulkan/vk_enum_string_helper.h>
 
 namespace lumina::platform::windows::vulkan {
 
+using namespace common::vulkan;
+
 auto InitializeVulkan(Window &window) noexcept
     -> std::expected<common::vulkan::VkInitializationResult,
                      VkInitializationError> {
   std::string error_message;
-  auto instance_result = CreateVulkanInstance();
+  common::vulkan::VulkanInstanceCreateInfo create_info{
+      .application_name = "Lumina",
+      .application_version_major = 1,
+      .application_version_minor = 0,
+      .application_version_patch = 0,
+      .required_extensions =
+          {
+              VK_KHR_SURFACE_EXTENSION_NAME,
+              VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+          },
+  };
+  auto instance_result = CreateVulkanInstance(create_info);
   if (instance_result) {
 
     VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;

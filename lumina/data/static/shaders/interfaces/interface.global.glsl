@@ -1,5 +1,4 @@
-// Global per-frame interface (set 0) — shared by ALL shader interfaces.
-// Every interface .glsl file MUST #include this file.
+// Global per-frame interface (set 0) — shared by ALL shaders
 // Do NOT add #version or main() here.
 
 struct PointLight {
@@ -9,14 +8,14 @@ struct PointLight {
   float attenuation_radius;
 };
 
-layout(set = 0, binding = 0, row_major) uniform UniformBufferObject {
+layout(set = 0, binding = 0, row_major) uniform FrameGlobals {
   mat4 view;
   mat4 proj;
   PointLight point_lights[16];
   vec3 camera_position;
   int point_light_count;
 }
-ubo;
+frame_globals;
 
 layout(push_constant) uniform PushConstants { layout(row_major) mat4 model; }
 pc;

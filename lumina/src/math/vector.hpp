@@ -92,6 +92,7 @@ public:
   [[nodiscard]] auto DataPtr() -> ScalarType * { return &e[0]; }
   [[nodiscard]] auto DataPtr() const -> const ScalarType * { return &e[0]; }
 };
+static_assert(sizeof(Vec2) == sizeof(f32) * 2, "Vec2 must be tightly packed");
 
 /**
  * @brief 3D vector class
@@ -215,6 +216,7 @@ public:
   [[nodiscard]] auto DataPtr() -> ScalarType * { return &e[0]; }
   [[nodiscard]] auto DataPtr() const -> const ScalarType * { return &e[0]; }
 };
+static_assert(sizeof(Vec3) == sizeof(f32) * 3, "Vec3 must be tightly packed");
 
 class Vec4 : public VectorBase {
   using VectorBase::VectorBase;
@@ -603,6 +605,7 @@ public:
   [[nodiscard]] auto DataPtr() -> ScalarType * { return &e[0]; }
   [[nodiscard]] auto DataPtr() const -> const ScalarType * { return &e[0]; }
 };
+static_assert(sizeof(Vec4) == sizeof(f32) * 4, "Vec4 must be tightly packed");
 
 // Vector concept, check that T has VectorBase as a base class
 template <typename T>

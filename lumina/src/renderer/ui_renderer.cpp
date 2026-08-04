@@ -3,7 +3,7 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
 #include "common/path_registry.hpp"
-#include "platform/common/platform_services.hpp"
+#include "platform/platform_common/platform_services.hpp"
 
 #include <cstring>
 #include <vector>
@@ -15,9 +15,10 @@ namespace lumina::renderer {
 // ---------------------------------------------------------------------------
 
 static auto LoadSpirV(const std::string &path) -> std::vector<u8> {
-  void *handle = platform::common::PlatformServices::Instance().LuminaOpenFile(
+  auto handle = platform::common::PlatformServices::Instance().LuminaOpenFile(
       path.c_str());
-  ASSERT(handle != nullptr, "Failed to open UI shader SPIR-V");
+  ASSERT(handle != platform::common::InvalidFileHandle,
+         "Failed to open UI shader SPIR-V");
   const size_t size =
       platform::common::PlatformServices::Instance().LuminaGetFileSize(handle);
   ASSERT(size > 0, "UI shader SPIR-V is empty");

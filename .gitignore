@@ -63,3 +63,6 @@ lumina/data/shaders/generated/
 # OS
 .DS_Store
 Thumbs.db
+
+# Spriv
+*.spv

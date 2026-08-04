@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace lumina::core {
 
@@ -22,8 +23,7 @@ struct ActionID {
   }
 
   u64 id;
-  consteval ActionID(const char *name) noexcept
-      : id(HashString(name)) {}
+  consteval ActionID(const char *name) noexcept : id(HashString(name)) {}
 
   explicit constexpr ActionID(std::string_view name) noexcept
       : id(HashString(name)) {}

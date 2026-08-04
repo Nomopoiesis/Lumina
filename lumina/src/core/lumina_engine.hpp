@@ -5,28 +5,31 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/timer.hpp"
-#include "platform/common/vulkan/vulkan_init_result.hpp"
-
-#include "math/matrix.hpp"
+#include "debug_overlay_controller.hpp"
+#include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "camera_movement_controller.hpp"
 #include "font.hpp"
-#include "texture.hpp"
 #include "input/input_dispatcher.hpp"
 #include "input/input_state.hpp"
 #include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
 #include "static_mesh.hpp"
+#include "texture.hpp"
+#include "window_dimensions.hpp"
 #include "world.hpp"
 
+
 namespace lumina::core {
-
+class LuminaEngine;
 class UISystem;
+} // namespace lumina::core
 
-struct WindowDimensions {
-  u32 width;
-  u32 height;
-};
+namespace lumina::renderer {
+auto UpdateFrameUniforms(lumina::core::LuminaEngine &engine) -> void;
+} // namespace lumina::renderer
+
+namespace lumina::core {
 
 struct LuminaInitializeInfo {
   platform::common::vulkan::VkInitializationResult vulkan_init_result;
@@ -36,21 +39,6 @@ struct LuminaInitializeInfo {
 struct FrameTimeInfo {
   f64 delta_time;
   f64 total_time;
-};
-
-struct PointLight {
-  alignas(16) math::Vec3 position;
-  f32 intensity = 0.0F;
-  alignas(16) math::Vec3 color;
-  f32 attenuation_radius = 0.0F;
-};
-
-struct UniformBufferObject {
-  alignas(16) math::Mat4 view;
-  alignas(16) math::Mat4 proj;
-  PointLight point_lights[16];
-  alignas(16) math::Vec3 camera_position;
-  u32 point_light_count = 0;
 };
 
 class LuminaEngine {
@@ -90,6 +78,15 @@ public:
     }
   }
   [[nodiscard]] auto IsCursorTrapped() const -> bool { return trap_cursor; }
+
+  auto ToggleBoundingBoxView() -> void {
+    show_bounding_boxes = !show_bounding_boxes;
+    LOG_INFO("Toggling bounding boxes view mode ({})", show_bounding_boxes);
+  }
+
+  [[nodiscard]] auto IsBoundingBoxViewEnabled() const -> bool {
+    return show_bounding_boxes;
+  }
 
   auto WindowResized() -> void { renderer->SetFramebufferResized(true); }
 
@@ -139,13 +136,18 @@ private:
 
   auto ProcessDeferredOperations() -> void;
 
+  friend auto renderer::UpdateFrameUniforms(LuminaEngine &engine) -> void;
+
   bool is_initialized = false;
 
   bool trap_cursor = false;
 
+  bool show_bounding_boxes = false;
+
   FrameTimeInfo frame_time_info{};
 
   std::unique_ptr<CameraMovementController> camera_movement_controller;
+  std::unique_ptr<DebugOverlayController> debug_overlay_controller;
 
   InputState input_state;
   InputDispatcher input_dispatcher;
@@ -161,6 +163,7 @@ private:
 
   std::unordered_map<std::string, Font> fonts;
   std::unique_ptr<UISystem> ui_system;
+  StaticMeshHandle debug_aabb_mesh_handle;
 };
 
 } // namespace lumina::core
