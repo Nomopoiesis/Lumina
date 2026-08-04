@@ -853,6 +853,9 @@ auto LuminaRenderer::RenderThread() -> void {
     ReleaseFrameContextForRender();
     TryReclaimFrameContexts();
   }
+  // Drain all in-flight GPU work before the thread exits so that Shutdown()
+  // can safely destroy GPU resources without a separate DeviceWaitIdle call.
+  vkDeviceWaitIdle(vulkan_context.GetDevice());
 }
 
 auto LuminaRenderer::PollAndExecuteCommandContexts() -> void {
@@ -1041,8 +1044,7 @@ auto LuminaRenderer::Initialize() -> void {
 
 auto LuminaRenderer::Shutdown() -> void {
   shutdown_requested = true;
-  render_thread.join();
-  DeviceWaitIdle();
+  render_thread.join();  // GPU is idle when this returns
   ui_renderer.Shutdown(vulkan_context);
 }
 

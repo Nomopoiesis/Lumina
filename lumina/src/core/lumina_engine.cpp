@@ -1,5 +1,6 @@
 #include "lumina_engine.hpp"
 
+#include <format>
 #include <unordered_set>
 
 #include "common/fast_random.hpp"
@@ -552,15 +553,23 @@ auto LuminaEngine::ExecuteFrame() -> void {
   job_manager->WaitForCounter(frame_sync_counter);
   job_manager->ReleaseCounter(frame_sync_counter);
 
+  // Build FPS text string - only integer fps and ms up to 2 decimal places
+  auto fps_text = std::format("FPS: {} ({:.2f}ms)",
+                              static_cast<int>(1.0F / GetFrameDeltaTime()),
+                              GetFrameDeltaTime() * 1000.0F);
+  auto fps_string = Clay_String{
+      .isStaticallyAllocated = false,
+      .length = static_cast<int32_t>(fps_text.length()),
+      .chars = fps_text.c_str(),
+  };
   CLAY({.id = CLAY_ID("HelloWorld"),
         .floating = {
             .offset = {10.0F, 10.0F},
             .attachTo = CLAY_ATTACH_TO_ROOT,
         }}) {
-    CLAY_TEXT(
-        CLAY_STRING("Hello World!"),
-        CLAY_TEXT_CONFIG(
-            {.textColor = {255, 255, 255, 255}, .fontId = 0, .fontSize = 24}));
+    CLAY_TEXT(fps_string, CLAY_TEXT_CONFIG({.textColor = {255, 255, 255, 255},
+                                            .fontId = 0,
+                                            .fontSize = 24}));
   }
 
   auto clay_commands = ui_system->EndLayout();
