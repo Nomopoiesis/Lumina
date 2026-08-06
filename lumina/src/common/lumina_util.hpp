@@ -3,7 +3,7 @@
 #include "lumina_assert.hpp"
 #include "lumina_types.hpp"
 #include <cstddef>
-
+#include <new>
 #include <atomic>
 
 #ifdef __cpp_lib_hardware_interference_size

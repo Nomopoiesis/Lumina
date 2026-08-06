@@ -11,6 +11,7 @@ target_sources(
             FILES
             debug_print.hpp
             lumina_assert.hpp
+            lumina_check.hpp
             lumina_types.hpp
             lumina_util.hpp
             scope_guard.hpp
@@ -20,7 +21,8 @@ target_sources(
             logger/file_target.hpp
             logger/logger.hpp
             lumina_terminate.hpp
-            data_structures/lock_free_pool.hpp
+            data_structures/lock_free_object_pool.hpp
+            data_structures/lock_free_concurrent_queue.hpp
             data_structures/work_stealing_deque.hpp
             data_structures/data_buffer.hpp
             path_resolver.hpp)

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <vulkan/vulkan.h>
 
+#include "common/lumina_check.hpp"
 #include "material_instance_handle.hpp"
 #include "math/matrix.hpp"
 #include "render_mesh.hpp"
@@ -91,7 +92,7 @@ public:
 
   auto SetTransientDescriptorPool(VkDescriptorPool descriptor_pool) noexcept
       -> void {
-    ASSERT(descriptor_pool != VK_NULL_HANDLE, "Invalid descriptor pool");
+    LUMINA_CHECK(descriptor_pool != VK_NULL_HANDLE, "Invalid descriptor pool");
     frame_transient_descriptor_pool = descriptor_pool;
   }
 

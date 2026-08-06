@@ -49,8 +49,8 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
       platform::common::PlatformServices::Instance().LuminaCreateDirectory(
           path.parent_path().string().c_str());
   if (!create_directory_success) {
-    LOG_ERROR("mesh_cache: failed to create cache directory: %s",
-              path.parent_path().string().c_str());
+    LOG_ERROR("mesh_cache: failed to create cache directory: {}",
+              path.parent_path().string());
     return std::unexpected(MeshCacheError{"failed to create cache directory"});
   }
 
@@ -58,8 +58,7 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
       platform::common::PlatformServices::Instance().LuminaCreateFile(
           path.string().c_str());
   if (file_handle == InvalidFileHandle) {
-    LOG_ERROR("mesh_cache: failed to open file for writing: %s",
-              path.string().c_str());
+    LOG_ERROR("mesh_cache: failed to open file for writing: {}", path.string());
     return std::unexpected(
         MeshCacheError{"failed to open cache file for writing"});
   }
@@ -103,11 +102,11 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
       platform::common::PlatformServices::Instance().LuminaWriteFile(
           file_handle, data_to_write.data(), data_to_write.size());
   if (!write_success) {
-    LOG_ERROR("mesh_cache: write error for: %s", path.string().c_str());
+    LOG_ERROR("mesh_cache: write error for: {}", path.string());
     return std::unexpected(MeshCacheError{"write error"});
   }
 
-  LOG_INFO("mesh_cache: wrote {}", path.string().c_str());
+  LOG_INFO("mesh_cache: wrote {}", path.string());
   return {};
 }
 
@@ -125,8 +124,7 @@ auto DeserializeStaticMesh(std::string_view cache_key,
       platform::common::PlatformServices::Instance().LuminaOpenFile(
           path.string().c_str());
   if (file_handle == InvalidFileHandle) {
-    LOG_ERROR("mesh_cache: failed to open cache file: %s",
-              path.string().c_str());
+    LOG_ERROR("mesh_cache: failed to open cache file: {}", path.string());
     return std::unexpected(MeshCacheError{"failed to open cache file"});
   }
 
@@ -134,7 +132,7 @@ auto DeserializeStaticMesh(std::string_view cache_key,
       platform::common::PlatformServices::Instance().LuminaGetFileSize(
           file_handle);
   if (file_size == 0) {
-    LOG_ERROR("mesh_cache: failed to get file size: %s", path.string().c_str());
+    LOG_ERROR("mesh_cache: failed to get file size: {}", path.string());
     return std::unexpected(MeshCacheError{"failed to get file size"});
   }
 
@@ -143,7 +141,7 @@ auto DeserializeStaticMesh(std::string_view cache_key,
       platform::common::PlatformServices::Instance().LuminaReadFile(
           file_handle, data_to_read.Data(), file_size);
   if (!read_success) {
-    LOG_ERROR("mesh_cache: failed to read file: %s", path.string().c_str());
+    LOG_ERROR("mesh_cache: failed to read file: {}", path.string());
     return std::unexpected(MeshCacheError{"failed to read file"});
   }
 
@@ -156,13 +154,13 @@ auto DeserializeStaticMesh(std::string_view cache_key,
   offset += sizeof(u32);
 
   if (magic != Magic) {
-    LOG_ERROR("mesh_cache: invalid magic in %s", path.string().c_str());
+    LOG_ERROR("mesh_cache: invalid magic in {}", path.string());
     return std::unexpected(MeshCacheError{"invalid cache file magic"});
   }
   if (version != Version) {
-    LOG_WARNING("mesh_cache: version mismatch in %s (got %u, expected %u) — "
+    LOG_WARNING("mesh_cache: version mismatch in {} (got {}, expected {}) — "
                 "treating as cache miss",
-                path.string().c_str(), version, Version);
+                path.string(), version, Version);
     return std::unexpected(MeshCacheError{"cache file version mismatch"});
   }
 
@@ -209,7 +207,7 @@ auto DeserializeStaticMesh(std::string_view cache_key,
               index_count * sizeof(u16));
   offset += index_count * sizeof(u16);
 
-  LOG_INFO("mesh_cache: loaded {}", path.string().c_str());
+  LOG_INFO("mesh_cache: loaded {}", path.string());
   return mesh;
 }
 

@@ -1,5 +1,15 @@
 # Compiler-specific options and warnings
 
+# Emit a PDB for every configuration, Release included. Optimizations and NDEBUG
+# stay exactly as they were, so release-only bugs still reproduce; the symbols
+# just make the resulting crash readable in a debugger.
+if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase")
+  add_link_options("$<$<NOT:$<CONFIG:Debug>>:/DEBUG>"
+                   "$<$<NOT:$<CONFIG:Debug>>:/OPT:REF>"
+                   "$<$<NOT:$<CONFIG:Debug>>:/OPT:ICF>")
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   message(STATUS "Using MSVC compiler")
   # MSVC compiler options

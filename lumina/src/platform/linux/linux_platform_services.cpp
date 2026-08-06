@@ -306,8 +306,27 @@ struct LinuxFiber {
   ucontext_t ctx{};
   void (*entry_point)(void *data) = nullptr;
   void *data = nullptr;
+  void *self = nullptr; // fiber-local slot, see LinuxGetFiberSelf
   std::unique_ptr<char[]> stack; // null for master (thread-converted) fibers
 };
+
+// ucontext has no fiber-local storage, so the fiber currently occupying this
+// thread is tracked explicitly and updated on both sides of every swap. The
+// per-fiber payload lives in LinuxFiber::self so it follows the fiber across
+// threads; only the "who is on this thread right now" pointer is thread_local.
+//
+// The accessors are noinline on purpose: an inlined thread_local read lets the
+// compiler cache the TLS block address across swapcontext, which is exactly the
+// bug fiber-local storage exists to avoid.
+thread_local LinuxFiber *t_current_fiber = nullptr;
+
+[[gnu::noinline]] auto CurrentFiber() -> LinuxFiber * {
+  return t_current_fiber;
+}
+
+[[gnu::noinline]] auto SetCurrentFiber(LinuxFiber *fiber) -> void {
+  t_current_fiber = fiber;
+}
 
 // makecontext only accepts int-sized arguments.  On 64-bit Linux a void*
 // must be split into two uint32_t words and reassembled inside the trampoline.
@@ -344,13 +363,31 @@ auto LinuxConvertThreadToFiber(void *data) -> void * {
   auto *fiber = new LinuxFiber{}; // NOLINT
   fiber->data = data;
   getcontext(&fiber->ctx);
+  // The converted thread is now running this (master) fiber.
+  SetCurrentFiber(fiber);
   return fiber;
 }
 
 auto LinuxSwitchToFiber(void *from_fiber, void *to_fiber) -> void {
   auto *from = static_cast<LinuxFiber *>(from_fiber);
   auto *to   = static_cast<LinuxFiber *>(to_fiber);
+  SetCurrentFiber(to);
   swapcontext(&from->ctx, &to->ctx);
+  // Resumed — possibly on a different thread than the one that suspended us,
+  // so re-establish our identity on whichever thread this now is.
+  SetCurrentFiber(from);
+}
+
+auto LinuxSetFiberSelf(void *self) -> void {
+  auto *fiber = CurrentFiber();
+  if (fiber != nullptr) {
+    fiber->self = self;
+  }
+}
+
+auto LinuxGetFiberSelf() -> void * {
+  auto *fiber = CurrentFiber();
+  return fiber != nullptr ? fiber->self : nullptr;
 }
 
 auto LinuxDestroyFiber(void *fiber) -> void {
@@ -415,7 +452,8 @@ auto InitPlatformServices() -> void {
       LinuxCreateConsole, LinuxWriteConsole, LinuxWaitConsoleKeypress,
       LinuxSetThreadName, LinuxPinThread, LinuxCreateFiber,
       LinuxConvertThreadToFiber, LinuxSwitchToFiber, LinuxDestroyFiber,
-      LinuxSetCursorPosition, LinuxSetCursorTrapped);
+      LinuxSetFiberSelf, LinuxGetFiberSelf, LinuxSetCursorPosition,
+      LinuxSetCursorTrapped);
 }
 
 } // namespace lumina::platform::llinux

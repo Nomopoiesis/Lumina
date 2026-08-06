@@ -1,5 +1,6 @@
 #include "static_shader_api.hpp"
 
+#include "common/lumina_check.hpp"
 #include "common/path_registry.hpp"
 #include "headers/color_output.frag.hpp"
 #include "headers/interface.global.hpp"
@@ -187,7 +188,8 @@ auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void {
 
   auto instance_opt = renderer->material_instance_manager.Get(
       renderer->default_material_instance_handle);
-  ASSERT(instance_opt.has_value(), "Default material instance not found");
+  LUMINA_CHECK(instance_opt.has_value(),
+               "Default material instance not found");
   auto &instance = instance_opt.value();
 
   mat::BindingData bindings{
@@ -208,7 +210,8 @@ auto UpdateDefaultMaterialTexture(LuminaRenderer *renderer, VkSampler sampler,
 
   auto instance_opt = renderer->material_instance_manager.Get(
       renderer->default_material_instance_handle);
-  ASSERT(instance_opt.has_value(), "Default material instance not found");
+  LUMINA_CHECK(instance_opt.has_value(),
+               "Default material instance not found");
   auto &instance = instance_opt.value();
 
   mat::BindingData bindings{

@@ -191,6 +191,22 @@ public:
     return result;
   }
 
+  auto operator+(Vec3 const &other) const -> Vec3 {
+    Vec3 result;
+    result.x = x + other.x;
+    result.y = y + other.y;
+    result.z = z + other.z;
+    return result;
+  }
+
+  auto operator-(Vec3 const &other) const -> Vec3 {
+    Vec3 result;
+    result.x = x - other.x;
+    result.y = y - other.y;
+    result.z = z - other.z;
+    return result;
+  }
+
   auto operator[](size_t idx) -> ScalarType & {
     ASSERT(idx < 3, "Vec3 index out of range");
     return e[idx];
@@ -583,6 +599,24 @@ public:
   auto operator[](size_t idx) -> ScalarType & {
     ASSERT(idx < 4, "Vec4 index out of range");
     return e[idx];
+  }
+
+  auto operator+(Vec4 const &other) const -> Vec4 {
+    Vec4 result;
+    result.x = x + other.x;
+    result.y = y + other.y;
+    result.z = z + other.z;
+    result.w = w + other.w;
+    return result;
+  }
+
+  auto operator-(Vec4 const &other) const -> Vec4 {
+    Vec4 result;
+    result.x = x - other.x;
+    result.y = y - other.y;
+    result.z = z - other.z;
+    result.w = w - other.w;
+    return result;
   }
 
   [[nodiscard]] auto operator[](size_t idx) const -> const ScalarType & {

@@ -1,5 +1,7 @@
 #include "vertex_serializer.hpp"
 
+#include "common/lumina_check.hpp"
+
 #include <algorithm>
 
 namespace lumina::renderer {
@@ -18,8 +20,8 @@ auto SerializeVertexBuffer(const core::StaticMesh &mesh,
           [stream_attribute](const auto &attribute) -> bool {
             return attribute.first.type == stream_attribute.type;
           });
-      ASSERT(it != mesh.vertex_attributes.end(),
-             "Stream attribute not found in mesh vertex attributes");
+      LUMINA_CHECK(it != mesh.vertex_attributes.end(),
+                   "Stream attribute not found in mesh vertex attributes");
       attribute_stride += core::GetElementTypeSize(it->first.element_type);
       attribute_data.push_back(&*it);
     }

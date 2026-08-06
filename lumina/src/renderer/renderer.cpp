@@ -3,8 +3,10 @@
 #include "common/data_structures/data_buffer.hpp"
 #include "common/logger/logger.hpp"
 #include "common/lumina_assert.hpp"
+#include "common/lumina_check.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/path_registry.hpp"
+#include "vk_check.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
@@ -341,7 +343,7 @@ static auto RecordVertexBufferUploadCommands(VulkanContext &vulkan_context,
   }
   auto copy_result = RecordDeviceCopyBufferCommands(
       command_buffer, staging_buffer.buffer, device_buffer.buffer, size);
-  ASSERT(copy_result, "Failed to copy buffer");
+  LUMINA_CHECK(copy_result, "Failed to copy vertex buffer");
 
   return std::make_tuple(true, staging_buffer, device_buffer);
 }
@@ -379,7 +381,7 @@ static auto RecordIndexBufferUploadCommands(VulkanContext &vulkan_context,
   }
   auto copy_result = RecordDeviceCopyBufferCommands(
       command_buffer, staging_buffer.buffer, device_buffer.buffer, size);
-  ASSERT(copy_result, "Failed to copy buffer");
+  LUMINA_CHECK(copy_result, "Failed to copy index buffer");
 
   return std::make_tuple(true, staging_buffer, device_buffer);
 }
@@ -622,7 +624,7 @@ static auto CreateDepthResources(VulkanContext &vulkan_context,
                                  VkDeviceMemory &depth_image_memory,
                                  VkFormat &depth_stencil_format) -> bool {
   auto depth_format = FindDepthFormat(vulkan_context);
-  ASSERT(depth_format, "Failed to find depth format");
+  LUMINA_CHECK(depth_format, "Failed to find depth format");
   depth_stencil_format = depth_format.value();
   auto width = vulkan_context.GetSwapChainImageExtent().width;
   auto height = vulkan_context.GetSwapChainImageExtent().height;
@@ -632,7 +634,7 @@ static auto CreateDepthResources(VulkanContext &vulkan_context,
               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   auto depth_image_view_result = vulkan_context.CreateImageView(
       depth_image, depth_format.value(), VK_IMAGE_ASPECT_DEPTH_BIT);
-  ASSERT(depth_image_view_result, "Failed to create depth image view");
+  LUMINA_CHECK(depth_image_view_result, "Failed to create depth image view");
   depth_image_view = depth_image_view_result.value();
   TransitionImageLayout(vulkan_context, command_pool, depth_image,
                         depth_stencil_format, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -766,7 +768,7 @@ auto LuminaRenderer::AcquireFrameContextForUpdate() -> void {
 }
 
 auto LuminaRenderer::ReleaseFrameContextForUpdate() -> void {
-  ASSERT(frame_context_for_update, "No frame context for update");
+  LUMINA_CHECK(frame_context_for_update, "No frame context for update");
   frame_context_for_update->pipeline_state.store(
       FrameContextPipelineState::UPDATE_COMPLETE);
   frame_context_for_update = nullptr;
@@ -788,7 +790,7 @@ auto LuminaRenderer::AcquireFrameContextForRender() -> void {
 }
 
 auto LuminaRenderer::ReleaseFrameContextForRender() -> void {
-  ASSERT(frame_context_for_render, "No frame context for render");
+  LUMINA_CHECK(frame_context_for_render, "No frame context for render");
   frame_context_for_render->pipeline_state.store(
       FrameContextPipelineState::RENDER_COMPLETE);
   frame_context_for_render = nullptr;
@@ -822,7 +824,8 @@ auto LuminaRenderer::TryReclaimFrameContexts() -> void {
   // most likely to be signaled first
   if (pending_completion == frame_contexts.size()) {
     auto ctx_idx = (current_frame_index - 1) % MAX_FRAMES_IN_FLIGHT;
-    ASSERT(ctx_idx < frame_contexts.size(), "Context index out of bounds");
+    LUMINA_CHECK(ctx_idx < frame_contexts.size(),
+                 "Frame context index out of bounds");
     vkWaitForFences(vulkan_context.GetDevice(), 1,
                     &frame_contexts[ctx_idx]->GetFrameBeginReadyFence(),
                     VK_TRUE, UINT64_MAX);
@@ -861,7 +864,7 @@ auto LuminaRenderer::PollAndExecuteCommandContexts() -> void {
   std::vector<CommandContext *> cmd_ctxs(size);
   for (size_t i = 0; i < size; ++i) {
     auto res = global_submission_queue.Pop(cmd_ctxs[i]);
-    ASSERT(res, "Failed to pop command context from submission queue");
+    LUMINA_CHECK(res, "Failed to pop command context from submission queue");
   }
 
   if (!cmd_ctxs.empty()) {
@@ -919,9 +922,10 @@ auto LuminaRenderer::PollAndExecuteCommandContexts() -> void {
 
 auto LuminaRenderer::Initialize() -> void {
   LOG_TRACE("Initializing Lumina Vulkan Renderer...");
-  if (!vulkan_context.Initialize()) {
+  auto vulkan_context_result = vulkan_context.Initialize();
+  if (!vulkan_context_result) {
     LOG_CRITICAL("Failed to initialize Vulkan context: {}",
-                 vulkan_context.Initialize().error().message);
+                 vulkan_context_result.error().message);
     LUMINA_TERMINATE();
   }
 
@@ -953,19 +957,20 @@ auto LuminaRenderer::Initialize() -> void {
   auto depth_result = CreateDepthResources(
       vulkan_context, command_pool, depth_image, depth_image_view,
       depth_image_memory, depth_stencil_format);
-  ASSERT(depth_result, "Failed to create depth resources");
+  LUMINA_CHECK(depth_result, "Failed to create depth resources");
 
   auto res = CreateTextureImage(vulkan_context, command_pool, texture_image,
                                 texture_image_memory);
-  ASSERT(res, "Failed to create texture image");
+  LUMINA_CHECK(res, "Failed to create texture image");
   auto texture_image_view_result =
       CreateTextureImageView(vulkan_context, texture_image);
-  ASSERT(texture_image_view_result, "Failed to create texture image view");
+  LUMINA_CHECK(texture_image_view_result,
+               "Failed to create texture image view");
   texture_image_view = texture_image_view_result.value();
 
   auto texture_sampler_result =
       CreateTextureSampler(vulkan_context, texture_sampler);
-  ASSERT(texture_sampler_result, "Failed to create texture sampler");
+  LUMINA_CHECK(texture_sampler_result, "Failed to create texture sampler");
   texture_sampler = texture_sampler_result.value();
 
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
@@ -981,7 +986,7 @@ auto LuminaRenderer::Initialize() -> void {
     auto uniform_buffer_result = CreateUniformBuffer(
         vulkan_context, uniform_buffer.memory, uniform_buffer.buffer,
         uniform_buffer.mapped, GetFrameGlobalsBufferSize());
-    ASSERT(uniform_buffer_result, "Failed to create uniform buffer");
+    LUMINA_CHECK(uniform_buffer_result, "Failed to create uniform buffer");
   }
 
   auto desc_pool_result = CreateDescriptorPools();
@@ -1011,7 +1016,7 @@ auto LuminaRenderer::Initialize() -> void {
   {
     auto mat_opt =
         material_instance_manager.Get(default_material_instance_handle);
-    ASSERT(mat_opt.has_value(), "Default material instance not found");
+    LUMINA_CHECK(mat_opt.has_value(), "Default material instance not found");
     default_pipeline_handle = CreateGraphicsPipeline(
         {.vertex_layout = VertexBufferLayout::Interleave(
              std::span<const core::VertexAttribute>(
@@ -1279,15 +1284,16 @@ ToVkAttributeDescriptions(const VertexBufferLayout &layout,
       for (u32 i = 0; i < vertex_input_layout.input_count; ++i) {
         if (vertex_input_layout.inputs[i].attribute_type == attr.type) {
           location = vertex_input_layout.inputs[i].location;
-          ASSERT(vertex_input_layout.inputs[i].element_type ==
-                     attr.element_type,
-                 "Vertex attribute element type does not match shader vertex "
-                 "input layout");
+          LUMINA_CHECK(
+              vertex_input_layout.inputs[i].element_type == attr.element_type,
+              "Vertex attribute element type does not match shader vertex "
+              "input layout");
           break;
         }
       }
-      ASSERT(location != UINT32_MAX, "Vertex attribute has no matching "
-                                     "location in shader vertex input layout");
+      LUMINA_CHECK(location != UINT32_MAX,
+                   "Vertex attribute has no matching location in shader "
+                   "vertex input layout");
       descriptions.push_back({
           .location = location,
           .binding = binding,
@@ -1309,8 +1315,8 @@ auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
   vkResetDescriptorPool(device, pool, 0);
 
   // Allocate a single descriptor set for set 0 (per-frame globals).
-  ASSERT(global_descriptor_set_layout != VK_NULL_HANDLE,
-         "Global descriptor set layout not created");
+  LUMINA_CHECK(global_descriptor_set_layout != VK_NULL_HANDLE,
+               "Global descriptor set layout not created");
   auto dsl = global_descriptor_set_layout;
 
   VkDescriptorSetAllocateInfo alloc_info = {
@@ -1322,8 +1328,8 @@ auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
   };
 
   VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-  auto result = vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set);
-  ASSERT(result == VK_SUCCESS, "Failed to allocate transient descriptor set");
+  VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set),
+           "Failed to allocate transient descriptor set");
 
   WriteTransientDescriptors(this, frame_context, descriptor_set);
 
@@ -1486,12 +1492,12 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
 
   auto vert_module_result = shader_module_cache.GetShaderModule(
       material_template->GetVertexShaderBinPath(), VK_SHADER_STAGE_VERTEX_BIT);
-  ASSERT(vert_module_result, "Failed to create vertex shader");
+  LUMINA_CHECK(vert_module_result, "Failed to create vertex shader");
 
   auto frag_module_result = shader_module_cache.GetShaderModule(
       material_template->GetFragmentShaderBinPath(),
       VK_SHADER_STAGE_FRAGMENT_BIT);
-  ASSERT(frag_module_result, "Failed to create fragment shader");
+  LUMINA_CHECK(frag_module_result, "Failed to create fragment shader");
 
   VkPipelineShaderStageCreateInfo shader_stages[] = {
       {
@@ -1878,7 +1884,9 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
 }
 
 auto LuminaRenderer::AcquireCommandContext() -> CommandContext & {
-  return *command_context_pool.Acquire();
+  auto *cmd_ctx = command_context_pool.Acquire();
+  LUMINA_CHECK(cmd_ctx != nullptr, "Command context pool exhausted");
+  return *cmd_ctx;
 }
 
 auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
@@ -1898,8 +1906,9 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
           layout = &pipeline.vertex_layout;
         }
       });
-  ASSERT(layout != nullptr,
-         "No pipeline found matching material template and mesh topology");
+  LUMINA_CHECK(layout != nullptr,
+               "No pipeline found matching material template and mesh "
+               "topology");
 
   auto &cmd_ctx = AcquireCommandContext();
   cmd_ctx.Begin();
@@ -1913,8 +1922,7 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
     auto [success, staging_buffer, device_buffer] =
         RecordVertexBufferUploadCommands(vulkan_context, cmd_ctx.command_buffer,
                                          vertex_stream.View());
-    // TODO: Handle error gracefully
-    ASSERT(success, "Failed to create vertex buffer");
+    LUMINA_CHECK(success, "Failed to create vertex buffer");
     auto &render_mesh_vertex_stream = render_mesh.vertex_streams.back();
     render_mesh_vertex_stream.buffer = device_buffer.buffer;
     render_mesh_vertex_stream.memory = device_buffer.memory;
@@ -1927,8 +1935,7 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
   auto [success, staging_buffer, device_buffer] =
       RecordIndexBufferUploadCommands(
           *cmd_ctx.vulkan_context, cmd_ctx.command_buffer, index_buffer.View());
-  // TODO: Handle error gracefully
-  ASSERT(success, "Failed to create index buffer");
+  LUMINA_CHECK(success, "Failed to create index buffer");
   render_mesh.index_buffer = device_buffer.buffer;
   render_mesh.index_buffer_memory = device_buffer.memory;
   render_mesh.index_count = mesh.indices.size();
@@ -2017,7 +2024,7 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
       render_texture.memory, vk_format, VK_IMAGE_TILING_OPTIMAL,
       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  ASSERT(image_created, "Failed to create render texture image");
+  LUMINA_CHECK(image_created, "Failed to create render texture image");
 
   auto &cmd_ctx = AcquireCommandContext();
   cmd_ctx.Begin();
@@ -2058,7 +2065,8 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
 
   auto image_view_result = vulkan_context.CreateImageView(
       render_texture.image, vk_format, VK_IMAGE_ASPECT_COLOR_BIT);
-  ASSERT(image_view_result, "Failed to create render texture image view");
+  LUMINA_CHECK(image_view_result,
+               "Failed to create render texture image view");
   render_texture.image_view = image_view_result.value();
 
   VkSamplerCreateInfo sampler_info = {};

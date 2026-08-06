@@ -1,5 +1,7 @@
 #include "vulkan_context.hpp"
 
+#include "common/lumina_check.hpp"
+
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -388,8 +390,8 @@ auto VulkanContext::DestroySwapChainImageViews() noexcept -> void {
 
 auto VulkanContext::RecreateSwapChain() noexcept
     -> std::expected<void, VkInitializationError> {
-  ASSERT(is_initialized, "Vulkan context is not initialized");
-  ASSERT(device != VK_NULL_HANDLE, "Device is null");
+  LUMINA_CHECK(is_initialized, "Vulkan context is not initialized");
+  LUMINA_CHECK(device != VK_NULL_HANDLE, "Device is null");
   vkDeviceWaitIdle(device);
   DestroySwapChainImageViews();
   DestroySwapChain();

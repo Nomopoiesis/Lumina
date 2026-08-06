@@ -4,6 +4,8 @@
 
 #include <unordered_map>
 #include <vector>
+#include <string>
+#include <charconv>
 
 namespace lumina::data_parsers {
 
@@ -163,6 +165,10 @@ auto ParseLine(const std::string_view &line, ParseContext &parse_context)
 
 auto ParseOBJ(const DataBufferView &data) -> OBJ_Result {
   OBJ_Result result;
+  if (data.IsEmpty()) {
+    return result;
+  }
+
   const auto *text = &data.As<char>();
   const auto *end = text + data.Size();
   ParseContext parse_context;
@@ -172,6 +178,12 @@ auto ParseOBJ(const DataBufferView &data) -> OBJ_Result {
     const auto line = std::string_view(text, line_length);
     ParseLine(line, parse_context);
     text = line_end + 1;
+  }
+
+  // A malformed file can parse without ever declaring an object; returning the
+  // empty result beats dereferencing objects.begin() on an empty map.
+  if (parse_context.objects.empty()) {
+    return result;
   }
 
   auto &mesh_data = parse_context.objects.begin()->second;

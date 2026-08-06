@@ -52,7 +52,8 @@ public:
                             void (*entry_point)(void *data), void *data),
       void *(*convert_thread_to_fiber)(void *data),
       void (*switch_to_fiber)(void *from_fiber, void *to_fiber),
-      void (*destroy_fiber)(void *fiber),
+      void (*destroy_fiber)(void *fiber), void (*set_fiber_self)(void *self),
+      void *(*get_fiber_self)(),
       void (*set_cursor_position)(f32 x, f32 y),
       void (*set_cursor_trapped)(bool trapped)) -> void {
     auto &instance = GetStaticInstance();
@@ -73,6 +74,8 @@ public:
     instance.LuminaConvertThreadToFiber = convert_thread_to_fiber;
     instance.LuminaSwitchToFiber = switch_to_fiber;
     instance.LuminaDestroyFiber = destroy_fiber;
+    instance.LuminaSetFiberSelf = set_fiber_self;
+    instance.LuminaGetFiberSelf = get_fiber_self;
     instance.LuminaSetCursorPosition = set_cursor_position;
     instance.LuminaSetCursorTrapped = set_cursor_trapped;
     instance.is_initialized_ = true;
@@ -152,6 +155,17 @@ public:
   // Destroys a fiber created by LuminaCreateFiber or LuminaConvertThreadToFiber
   // and frees any associated resources (stack, context struct, etc.)
   void (*LuminaDestroyFiber)(void *fiber) = nullptr;
+
+  // Fiber-local storage for a single pointer identifying the running fiber.
+  //
+  // This exists because thread_local is unsafe on a fiber stack: a fiber can be
+  // resumed on a different thread than it last ran on, while compilers cache
+  // the thread's TLS block address across calls. These must resolve against the
+  // *currently executing fiber*, not the thread, and must not be cacheable
+  // across a fiber switch. Returns nullptr on a thread that is not running a
+  // job fiber.
+  void (*LuminaSetFiberSelf)(void *self) = nullptr;
+  void *(*LuminaGetFiberSelf)() = nullptr;
 
   // Cursor operations
   // Sets the cursor position

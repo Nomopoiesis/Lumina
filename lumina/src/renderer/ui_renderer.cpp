@@ -4,6 +4,7 @@
 #include "common/lumina_assert.hpp"
 #include "common/path_registry.hpp"
 #include "platform/platform_common/platform_services.hpp"
+#include "vk_check.hpp"
 
 #include <cstring>
 #include <vector>
@@ -17,15 +18,21 @@ namespace lumina::renderer {
 static auto LoadSpirV(const std::string &path) -> std::vector<u8> {
   auto handle = platform::common::PlatformServices::Instance().LuminaOpenFile(
       path.c_str());
-  ASSERT(handle != platform::common::InvalidFileHandle,
-         "Failed to open UI shader SPIR-V");
+  if (handle == platform::common::InvalidFileHandle) {
+    LOG_CRITICAL("Failed to open UI shader SPIR-V: {}", path);
+    LUMINA_TERMINATE();
+  }
   const size_t size =
       platform::common::PlatformServices::Instance().LuminaGetFileSize(handle);
-  ASSERT(size > 0, "UI shader SPIR-V is empty");
   std::vector<u8> data(size);
-  platform::common::PlatformServices::Instance().LuminaReadFile(
-      handle, data.data(), size);
+  const bool read_success =
+      platform::common::PlatformServices::Instance().LuminaReadFile(
+          handle, data.data(), size);
   platform::common::PlatformServices::Instance().LuminaCloseFile(handle);
+  if (!read_success || size == 0) {
+    LOG_CRITICAL("Failed to read UI shader SPIR-V: {}", path);
+    LUMINA_TERMINATE();
+  }
   return data;
 }
 
@@ -39,7 +46,11 @@ static auto FindMemoryTypeIndex(VulkanContext &ctx, u32 type_bits,
       return i;
     }
   }
-  ASSERT(false, "No suitable memory type for UI buffer");
+  // Falling through to an arbitrary memory type index would produce a bogus
+  // allocation rather than a diagnosable failure.
+  LOG_CRITICAL("No suitable memory type for UI buffer (type_bits: {:#x})",
+               type_bits);
+  LUMINA_TERMINATE();
   return 0;
 }
 
@@ -52,9 +63,8 @@ static auto CreateHostBuffer(VulkanContext &ctx, VkDeviceSize size,
       .usage = usage,
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
   };
-  ASSERT(vkCreateBuffer(ctx.GetDevice(), &buf_info, nullptr, &buffer) ==
-             VK_SUCCESS,
-         "Failed to create UI buffer");
+  VK_CHECK(vkCreateBuffer(ctx.GetDevice(), &buf_info, nullptr, &buffer),
+           "Failed to create UI buffer");
 
   VkMemoryRequirements req;
   vkGetBufferMemoryRequirements(ctx.GetDevice(), buffer, &req);
@@ -67,11 +77,12 @@ static auto CreateHostBuffer(VulkanContext &ctx, VkDeviceSize size,
                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
   };
-  ASSERT(vkAllocateMemory(ctx.GetDevice(), &alloc, nullptr, &memory) ==
-             VK_SUCCESS,
-         "Failed to allocate UI buffer memory");
-  vkBindBufferMemory(ctx.GetDevice(), buffer, memory, 0);
-  vkMapMemory(ctx.GetDevice(), memory, 0, size, 0, &mapped);
+  VK_CHECK(vkAllocateMemory(ctx.GetDevice(), &alloc, nullptr, &memory),
+           "Failed to allocate UI buffer memory");
+  VK_CHECK(vkBindBufferMemory(ctx.GetDevice(), buffer, memory, 0),
+           "Failed to bind UI buffer memory");
+  VK_CHECK(vkMapMemory(ctx.GetDevice(), memory, 0, size, 0, &mapped),
+           "Failed to map UI buffer memory");
 }
 
 // ---------------------------------------------------------------------------
@@ -228,9 +239,9 @@ auto UIRenderer::CreateDescriptors(VulkanContext &ctx) -> void {
       .bindingCount = 1,
       .pBindings = &binding,
   };
-  ASSERT(vkCreateDescriptorSetLayout(ctx.GetDevice(), &dsl_info, nullptr,
-                                     &descriptor_set_layout) == VK_SUCCESS,
-         "Failed to create UI descriptor set layout");
+  VK_CHECK(vkCreateDescriptorSetLayout(ctx.GetDevice(), &dsl_info, nullptr,
+                                       &descriptor_set_layout),
+           "Failed to create UI descriptor set layout");
 
   // Descriptor pool
   VkDescriptorPoolSize pool_size{
@@ -243,9 +254,9 @@ auto UIRenderer::CreateDescriptors(VulkanContext &ctx) -> void {
       .poolSizeCount = 1,
       .pPoolSizes = &pool_size,
   };
-  ASSERT(vkCreateDescriptorPool(ctx.GetDevice(), &pool_info, nullptr,
-                                &descriptor_pool) == VK_SUCCESS,
-         "Failed to create UI descriptor pool");
+  VK_CHECK(vkCreateDescriptorPool(ctx.GetDevice(), &pool_info, nullptr,
+                                  &descriptor_pool),
+           "Failed to create UI descriptor pool");
 
   // Allocate one descriptor set per frame-in-flight
   for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
@@ -255,10 +266,9 @@ auto UIRenderer::CreateDescriptors(VulkanContext &ctx) -> void {
         .descriptorSetCount = 1,
         .pSetLayouts = &descriptor_set_layout,
     };
-    ASSERT(vkAllocateDescriptorSets(ctx.GetDevice(), &alloc_info,
-                                    &frame_resources[i].descriptor_set) ==
-               VK_SUCCESS,
-           "Failed to allocate UI descriptor set");
+    VK_CHECK(vkAllocateDescriptorSets(ctx.GetDevice(), &alloc_info,
+                                      &frame_resources[i].descriptor_set),
+             "Failed to allocate UI descriptor set");
   }
 }
 
@@ -280,9 +290,8 @@ auto UIRenderer::CreatePipeline(VulkanContext &ctx,
         .pCode = reinterpret_cast<const u32 *>(code.data()),
     };
     VkShaderModule mod = VK_NULL_HANDLE;
-    ASSERT(vkCreateShaderModule(ctx.GetDevice(), &info, nullptr, &mod) ==
-               VK_SUCCESS,
-           "Failed to create UI shader module");
+    VK_CHECK(vkCreateShaderModule(ctx.GetDevice(), &info, nullptr, &mod),
+             "Failed to create UI shader module");
     return mod;
   };
 
@@ -302,9 +311,9 @@ auto UIRenderer::CreatePipeline(VulkanContext &ctx,
       .pushConstantRangeCount = 1,
       .pPushConstantRanges = &pc_range,
   };
-  ASSERT(vkCreatePipelineLayout(ctx.GetDevice(), &layout_info, nullptr,
-                                &pipeline_layout) == VK_SUCCESS,
-         "Failed to create UI pipeline layout");
+  VK_CHECK(vkCreatePipelineLayout(ctx.GetDevice(), &layout_info, nullptr,
+                                  &pipeline_layout),
+           "Failed to create UI pipeline layout");
 
   VkPipelineShaderStageCreateInfo stages[2] = {
       {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -432,10 +441,9 @@ auto UIRenderer::CreatePipeline(VulkanContext &ctx,
       .renderPass = VK_NULL_HANDLE,
   };
 
-  ASSERT(vkCreateGraphicsPipelines(ctx.GetDevice(), VK_NULL_HANDLE, 1,
-                                   &pipe_info, nullptr,
-                                   &pipeline) == VK_SUCCESS,
-         "Failed to create UI graphics pipeline");
+  VK_CHECK(vkCreateGraphicsPipelines(ctx.GetDevice(), VK_NULL_HANDLE, 1,
+                                     &pipe_info, nullptr, &pipeline),
+           "Failed to create UI graphics pipeline");
 
   vkDestroyShaderModule(ctx.GetDevice(), vert_module, nullptr);
   vkDestroyShaderModule(ctx.GetDevice(), frag_module, nullptr);

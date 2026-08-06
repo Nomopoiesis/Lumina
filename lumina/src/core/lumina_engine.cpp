@@ -3,9 +3,11 @@
 #include <format>
 #include <unordered_set>
 
+#include "bounding_box.hpp"
 #include "common/data_structures/data_buffer.hpp"
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
+#include "common/lumina_check.hpp"
 #include "common/path_registry.hpp"
 #include "data_structures/data_buffer.hpp"
 #include "platform/platform_common/file_handle.hpp"
@@ -17,6 +19,7 @@
 #include "components/transform.hpp"
 #include "data_parsers/obj_parser.hpp"
 #include "font.hpp"
+#include "frustum.hpp"
 #include "input/input_action.hpp"
 #include "math/basic.hpp"
 #include "math/trigonometry.hpp"
@@ -367,21 +370,32 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   }
   if (!loaded_from_cache) {
     LOG_INFO("Parsing OBJ: suzanne");
+    const auto model_path =
+        lumina::common::PathRegistry::Instance().models.Resolve("suzanne.obj");
     auto file_handle =
         platform::common::PlatformServices::Instance().LuminaOpenFile(
-            lumina::common::PathRegistry::Instance()
-                .models.Resolve("suzanne.obj")
-                .string()
-                .c_str());
-    ASSERT(file_handle != InvalidFileHandle, "Failed to open model file");
+            model_path.string().c_str());
+    if (file_handle == InvalidFileHandle) {
+      LOG_CRITICAL("Failed to open model file: {}", model_path.string());
+      LUMINA_TERMINATE();
+    }
     std::size_t file_size =
         platform::common::PlatformServices::Instance().LuminaGetFileSize(
             file_handle);
     common::data_structures::DataBuffer data_buffer(file_size);
-    platform::common::PlatformServices::Instance().LuminaReadFile(
-        file_handle, data_buffer.Data(), file_size);
+    const bool read_success =
+        platform::common::PlatformServices::Instance().LuminaReadFile(
+            file_handle, data_buffer.Data(), file_size);
     platform::common::PlatformServices::Instance().LuminaCloseFile(file_handle);
+    if (!read_success || file_size == 0) {
+      LOG_CRITICAL("Failed to read model file: {}", model_path.string());
+      LUMINA_TERMINATE();
+    }
     auto obj_data = data_parsers::ParseOBJ(data_buffer.View());
+    if (obj_data.vertex_count == 0) {
+      LOG_CRITICAL("Model file contained no geometry: {}", model_path.string());
+      LUMINA_TERMINATE();
+    }
     static_mesh.vertex_count = obj_data.vertex_count;
     static_mesh.vertex_attributes.emplace_back(
         VertexAttribute{.type = VertexAttributeType::Position,
@@ -406,7 +420,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
     auto cache_result =
         SerializeStaticMesh(static_mesh, ModelCacheKey, model_cache);
     if (!cache_result.has_value()) {
-      LOG_WARNING("Failed to write mesh cache: %s",
+      LOG_WARNING("Failed to write mesh cache: {}",
                   cache_result.error().message);
     }
   }
@@ -513,7 +527,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
         job->execute = [static_mesh_handle](void *data) -> void {
           auto *engine = static_cast<LuminaEngine *>(data);
           auto m_opt = engine->static_mesh_manager.Get(static_mesh_handle);
-          ASSERT(m_opt.has_value(), "Static mesh not found");
+          LUMINA_CHECK(m_opt.has_value(), "Static mesh not found");
           auto &m = m_opt.value();
           auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
               *m, engine->GetRenderer().GetDefaultMaterialTemplateHandle());
@@ -543,7 +557,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
     job->execute = [handle](void *data) -> void {
       auto *engine = static_cast<LuminaEngine *>(data);
       auto t_opt = engine->texture_manager.Get(handle);
-      ASSERT(t_opt.has_value(), "Texture not found during GPU upload");
+      LUMINA_CHECK(t_opt.has_value(), "Texture not found during GPU upload");
       auto rth = engine->renderer->CreateRenderTexture(*t_opt.value());
       engine->texture_manager.Update(
           handle, [rth](Texture &t) -> void { t.render_texture_handle = rth; });
@@ -567,50 +581,53 @@ auto LuminaEngine::ExecuteFrame() -> void {
     auto *engine = static_cast<LuminaEngine *>(data);
     auto *frame_context = engine->renderer->GetFrameContextForUpdate();
     frame_context->draw_list.clear();
-    engine->current_world->ForEachComponent<StaticMeshComponent>(
-        [engine, frame_context](EntityID id,
-                                const StaticMeshComponent &component) -> void {
-          auto mesh_opt =
-              engine->static_mesh_manager.Get(component.GetStaticMeshHandle());
-          auto transform = engine->current_world->GetComponent<Transform>(id);
-          if (!mesh_opt.has_value()) {
-            return;
-          }
-          auto &mesh = mesh_opt.value();
-          if (mesh->render_mesh_handle.index == INVALID_RESOURCE_HANDLE_INDEX) {
-            return;
-          }
-          frame_context->draw_list.emplace_back(renderer::DrawMeshCommand{
-              .render_mesh_handle = mesh->render_mesh_handle,
-              .material_instance =
-                  engine->renderer->GetDefaultMaterialInstanceHandle(),
-              .model = transform.GetModelMatrix()});
-          if (engine->show_bounding_boxes) {
-            auto aabb_mesh_opt =
-                engine->static_mesh_manager.Get(engine->debug_aabb_mesh_handle);
-            if (!aabb_mesh_opt.has_value()) {
-              return;
-            }
-            auto world_aabb = TransformAABoundingBox(
-                mesh->bounding_box, transform.GetModelMatrix());
-            math::Vec3 center{
-                (world_aabb.min.x + world_aabb.max.x) * 0.5F,
-                (world_aabb.min.y + world_aabb.max.y) * 0.5F,
-                (world_aabb.min.z + world_aabb.max.z) * 0.5F,
-            };
-            math::Vec3 size{
-                world_aabb.max.x - world_aabb.min.x,
-                world_aabb.max.y - world_aabb.min.y,
-                world_aabb.max.z - world_aabb.min.z,
-            };
-            frame_context->draw_list.emplace_back(
-                renderer::DrawDebugAABBCommand{
-                    .render_mesh_handle =
-                        aabb_mesh_opt.value()->render_mesh_handle,
-                    .model = math::Dot(math::ScaleMatrix(size),
-                                       math::TranslationMatrix(center))});
-          }
-        });
+    engine->drawable_proxy_scene.Sync(
+        *engine->current_world, engine->static_mesh_manager, *engine->renderer);
+    auto camera_id = engine->current_world->GetActiveCamera();
+    auto transform = engine->current_world->GetTransform(camera_id);
+    auto camera = engine->current_world->GetComponent<Camera>(camera_id);
+    auto view = CalculateViewMatrix(transform);
+    auto proj = camera.ToProjectionMatrix();
+    auto frustum = ExtractFrustumFromMatrix(math::Dot(view, proj));
+
+    auto &proxy_scene = engine->drawable_proxy_scene;
+
+    // Resolved once rather than per visible proxy: it is the same debug mesh
+    // for every box.
+    renderer::RenderMeshHandle debug_aabb_render_mesh{};
+    if (engine->show_bounding_boxes) {
+      auto aabb_mesh_opt =
+          engine->static_mesh_manager.Get(engine->debug_aabb_mesh_handle);
+      if (aabb_mesh_opt.has_value()) {
+        debug_aabb_render_mesh = aabb_mesh_opt.value()->render_mesh_handle;
+      }
+    }
+    const bool draw_debug_aabbs =
+        engine->show_bounding_boxes &&
+        debug_aabb_render_mesh.index != INVALID_RESOURCE_HANDLE_INDEX;
+
+    const auto count = proxy_scene.ProxyCount();
+    for (size_t i = 0; i < count; ++i) {
+      auto aabbce = AABoundingBoxCenterExtent{
+          .center = math::Vec3{proxy_scene.center_x[i], proxy_scene.center_y[i],
+                               proxy_scene.center_z[i]},
+          .extent = math::Vec3{proxy_scene.extent_x[i], proxy_scene.extent_y[i],
+                               proxy_scene.extent_z[i]},
+      };
+      if (TestAABoundingBox(frustum, aabbce) == FrustumTestResult::Outside) {
+        continue;
+      }
+      frame_context->draw_list.emplace_back(renderer::DrawMeshCommand{
+          .render_mesh_handle = proxy_scene.mesh_handle[i],
+          .material_instance = proxy_scene.material[i],
+          .model = proxy_scene.model[i]});
+      if (draw_debug_aabbs) {
+        frame_context->draw_list.emplace_back(renderer::DrawDebugAABBCommand{
+            .render_mesh_handle = debug_aabb_render_mesh,
+            .model = math::Dot(math::ScaleMatrix(aabbce.extent * 2.0F),
+                               math::TranslationMatrix(aabbce.center))});
+      }
+    }
   };
   job->data = this;
   job->signal_counter = frame_sync_counter;

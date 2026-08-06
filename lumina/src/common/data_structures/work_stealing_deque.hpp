@@ -103,6 +103,10 @@ auto WorkStealingDeque<T>::Push(const T &value) -> bool {
     if (!Grow()) {
       return false;
     }
+    // Grow() installs a new buffer and retires the old one. The cached pointer
+    // still names the retired buffer, which Pop() and Steal() no longer read —
+    // writing the value there would silently drop the item.
+    storage_ptr = storage.load(std::memory_order_relaxed);
   }
 
   storage_ptr->At(bottom_index_value).store(value, std::memory_order_relaxed);

@@ -248,6 +248,27 @@ auto WinDestroyFiber(void *fiber) -> void {
   DeleteFiber(fiber);
 }
 
+// Fiber-local storage slot holding the running fiber's identity.
+//
+// Deliberately FLS and not thread_local: the value has to follow the fiber
+// across threads, and FlsGetValue is an opaque call the optimizer cannot hoist
+// across a fiber switch the way it hoists a TLS block address.
+DWORD g_fiber_self_slot = FLS_OUT_OF_INDEXES;
+
+auto WinSetFiberSelf(void *self) -> void {
+  if (g_fiber_self_slot == FLS_OUT_OF_INDEXES) {
+    return;
+  }
+  FlsSetValue(g_fiber_self_slot, self);
+}
+
+auto WinGetFiberSelf() -> void * {
+  if (g_fiber_self_slot == FLS_OUT_OF_INDEXES) {
+    return nullptr;
+  }
+  return FlsGetValue(g_fiber_self_slot);
+}
+
 auto WinSetCursorPosition(f32 x, f32 y) -> void {
   POINT point = {static_cast<int>(x), static_cast<int>(y)};
   auto *window = Window::Instance().GetWindowHandle();
@@ -273,12 +294,15 @@ auto WinSetCursorTrapped(bool trapped) -> void {
 } // namespace
 
 auto InitPlatformServices() -> void {
+  g_fiber_self_slot = FlsAlloc(nullptr);
+
   lumina::platform::common::PlatformServices::Initialize(
       WinCreateFile, WinCreateDirectory, WinOpenFile, WinGetFileSize,
       WinWriteFile, WinReadFile, WinCloseFile, WinDeleteFile, WinCreateConsole,
       WinWriteConsole, WinWaitConsoleKeypress, WinSetThreadName, WinPinThread,
       WinCreateFiber, WinConvertThreadToFiber, WinSwitchToFiber,
-      WinDestroyFiber, WinSetCursorPosition, WinSetCursorTrapped);
+      WinDestroyFiber, WinSetFiberSelf, WinGetFiberSelf, WinSetCursorPosition,
+      WinSetCursorTrapped);
 }
 
 } // namespace lumina::platform::windows

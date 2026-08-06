@@ -13,6 +13,8 @@ target_sources(
           ui/ui_system.cpp
           vertex_attribute.cpp
           bounding_box.cpp
+          frustum.cpp
+          drawable_proxy_scene.cpp
           debug_overlay_controller.cpp)
 
 # Uniform interface

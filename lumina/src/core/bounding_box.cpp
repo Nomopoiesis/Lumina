@@ -1,6 +1,7 @@
 #include "bounding_box.hpp"
 #include "lumina_assert.hpp"
 
+#include "math/basic.hpp"
 #include "math/linear_algebra.hpp"
 #include "math/vector.hpp"
 
@@ -29,23 +30,7 @@ auto ComputeAABoundingBox(const math::Vec3 *positions, size_t vertex_count)
 
 auto TransformAABoundingBox(const AABoudingBox &aabb,
                             const math::Mat4 &transform) -> AABoudingBox {
-  // Transform the 8 corners of the AABB and compute a new AABB that contains
-  // them
-  math::Vec3 corners[8] = {
-      {aabb.min.x, aabb.min.y, aabb.min.z},
-      {aabb.max.x, aabb.min.y, aabb.min.z},
-      {aabb.min.x, aabb.max.y, aabb.min.z},
-      {aabb.max.x, aabb.max.y, aabb.min.z},
-      {aabb.min.x, aabb.min.y, aabb.max.z},
-      {aabb.max.x, aabb.min.y, aabb.max.z},
-      {aabb.min.x, aabb.max.y, aabb.max.z},
-      {aabb.max.x, aabb.max.y, aabb.max.z},
-  };
-  for (math::Vec3 &corner : corners) {
-    auto transformed = math::Dot(math::Vec4(corner, 1.0F), transform);
-    corner = transformed.xyz();
-  }
-  return ComputeAABoundingBox(corners, 8);
+  return ToMinMax(TransformToCenterExtent(aabb, transform));
 }
 
 auto TransformOrientedBoundingBox(const OrientedBoundingBox &obb,
@@ -58,6 +43,35 @@ auto TransformOrientedBoundingBox(const OrientedBoundingBox &obb,
     result.corners[idx++] = transformed.xyz();
   }
   return result;
+}
+
+auto ToCenterExtent(const AABoudingBox &aabb) -> AABoundingBoxCenterExtent {
+  return {.center = (aabb.min + aabb.max) * 0.5F,
+          .extent = (aabb.max - aabb.min) * 0.5F};
+}
+
+auto ToMinMax(const AABoundingBoxCenterExtent &aabbce) -> AABoudingBox {
+  return {.min = aabbce.center - aabbce.extent,
+          .max = aabbce.center + aabbce.extent};
+}
+
+auto TransformToCenterExtent(const AABoudingBox &aabb,
+                             const math::Mat4 &transform)
+    -> AABoundingBoxCenterExtent {
+  auto aabbce = ToCenterExtent(aabb);
+  math::Vec3 extent(0.0F);
+  math::Vec3 center(0.0F);
+  for (int i = 0; i < 3; ++i) {
+    f32 axis_x = math::Abs(transform[0][i]);
+    f32 axis_y = math::Abs(transform[1][i]);
+    f32 axis_z = math::Abs(transform[2][i]);
+    extent[i] = (aabbce.extent.x * axis_x) + (aabbce.extent.y * axis_y) +
+                (aabbce.extent.z * axis_z);
+    center[i] = (aabbce.center.x * transform[0][i]) +
+                (aabbce.center.y * transform[1][i]) +
+                (aabbce.center.z * transform[2][i]) + transform[3][i];
+  }
+  return {.center = center, .extent = extent};
 }
 
 } // namespace lumina::core

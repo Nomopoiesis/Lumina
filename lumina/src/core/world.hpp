@@ -3,6 +3,8 @@
 #include "components/component_storage.hpp"
 #include "entity_manager.hpp"
 
+#include "components/transform.hpp"
+
 #include <memory>
 #include <vector>
 
@@ -38,6 +40,14 @@ public:
   auto SetActiveCamera(EntityID id) -> void;
 
   [[nodiscard]] auto GetActiveCamera() -> EntityID;
+
+  [[nodiscard]] auto GetTransform(EntityID id) -> components::Transform {
+    return GetComponent<components::Transform>(id);
+  }
+
+  [[nodiscard]] auto GetPosition(EntityID id) -> math::Vec3 {
+    return GetTransform(id).position;
+  }
 
 private:
   EntityManager entity_manager;

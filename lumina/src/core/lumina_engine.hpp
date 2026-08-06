@@ -9,6 +9,7 @@
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "camera_movement_controller.hpp"
+#include "drawable_proxy_scene.hpp"
 #include "font.hpp"
 #include "input/input_dispatcher.hpp"
 #include "input/input_state.hpp"
@@ -160,6 +161,11 @@ private:
 
   StaticMeshManager static_mesh_manager;
   TextureManager texture_manager;
+
+  // Flat rendering-side view of current_world, rebuilt by Sync() each frame and
+  // consumed by the cull. Single-buffered on purpose: only one frame context is
+  // in update at a time, so the cull's inputs never need per-frame copies.
+  DrawableProxyScene drawable_proxy_scene;
 
   std::unordered_map<std::string, Font> fonts;
   std::unique_ptr<UISystem> ui_system;

@@ -37,6 +37,9 @@ target_sources(
             stb_truetype.h
             stb_image.h)
 
-target_compile_options(lumina_stb INTERFACE -w)
-
-target_include_directories(lumina_stb INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+# SYSTEM marks the stb headers as external, which suppresses warnings coming
+# from them without touching the warning level of the consuming target.
+# Do NOT use `target_compile_options(... INTERFACE -w)` here - that propagates
+# to every translation unit of every consumer, silencing our own warnings too.
+target_include_directories(lumina_stb SYSTEM
+                           INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
