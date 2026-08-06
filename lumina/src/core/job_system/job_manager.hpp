@@ -6,9 +6,11 @@
 #include "data_structures/lock_free_concurrent_queue.hpp"
 #include "data_structures/lock_free_object_pool.hpp"
 #include "data_structures/work_stealing_deque.hpp"
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <thread>
+#include <type_traits>
 
 namespace lumina::core::job_system {
 
@@ -18,6 +20,9 @@ class JobManager;
 struct FiberContext;
 struct WorkerContext;
 
+// Upper bound on fibers that can suspend on a single counter.
+inline constexpr size_t MaxCounterWaiters = 16;
+
 struct Counter {
   std::atomic<u32> value;
   std::atomic<u32> waiting_count;
@@ -25,7 +30,7 @@ struct Counter {
   // Fibers suspended on this counter. Whoever resumes one must also be able to
   // return it to the fiber pool once its job completes, so this tracks the
   // owning context rather than the bare fiber handle.
-  std::atomic<FiberContext *> waiting_fibers[16];
+  std::atomic<FiberContext *> waiting_fibers[MaxCounterWaiters];
 
   auto Reset() -> void {
     value.store(0);
@@ -194,5 +199,71 @@ auto ShutdownJobSystem() -> void;
 
 // Valid only between InitializeJobSystem and ShutdownJobSystem.
 auto GetJobManager() -> JobManager &;
+
+// Upper bound on the jobs a single ParallelForBatched may submit. The binding
+// limits are the 1024-entry job pool and, when called from a worker fiber, that
+// worker's deque — SubmitJob from a fiber pushes locally rather than
+// round-robin, so every chunk job lands in one deque. Failing here names the
+// cause; overrunning either limit does not.
+inline constexpr size_t MaxParallelForJobs = 256;
+
+// Splits [0, count) into batch_size ranges and runs them across the worker
+// pool, one job per chunk — so batch_size is also how the caller controls how
+// many jobs this creates.
+//
+// `func` is invoked as func(begin, end) once per chunk, concurrently from
+// several threads. It must be safe to call that way, and chunks must not write
+// to overlapping state. The chunk index is begin / batch_size, which is what
+// lets callers write into per-chunk output slices without atomics.
+template <typename F>
+auto ParallelForBatched(size_t count, size_t batch_size, F &&func) -> void {
+  if (count == 0) {
+    return;
+  }
+  ASSERT(batch_size > 0, "ParallelForBatched batch_size must be nonzero");
+
+  if (count <= batch_size) {
+    func(size_t{0}, count);
+    return;
+  }
+
+  struct DrainState {
+    std::atomic<size_t> cursor{0};
+    size_t count;
+    size_t batch_size;
+    std::remove_reference_t<F> *body;
+  } state = {0, count, batch_size, &func};
+
+  auto drain = [](void *data) {
+    auto *drain_state = static_cast<DrainState *>(data);
+    for (;;) {
+      auto begin = drain_state->cursor.fetch_add(drain_state->batch_size,
+                                                 std::memory_order_relaxed);
+      if (begin >= drain_state->count) {
+        break;
+      }
+      (*drain_state->body)(
+          begin, std::min(begin + drain_state->batch_size, drain_state->count));
+    }
+  };
+
+  const size_t chunk_count = (count + batch_size - 1) / batch_size;
+  LUMINA_CHECK(chunk_count <= MaxParallelForJobs,
+               "ParallelForBatched batch_size too small for the job budget");
+
+  auto &manager = GetJobManager();
+  auto *counter = manager.AllocateCounter(static_cast<u32>(chunk_count));
+  for (size_t i = 0; i < chunk_count; ++i) {
+    auto *job = manager.AcquireJob();
+    job->signal_counter = counter;
+    job->data = &state;
+    job->execute = drain;
+    manager.SubmitJob(job);
+  }
+  drain(&state);
+
+  manager.WaitForCounter(counter);
+  manager.ReleaseCounter(counter);
+}
 
 } // namespace lumina::core::job_system

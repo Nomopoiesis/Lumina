@@ -9,7 +9,8 @@
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "camera_movement_controller.hpp"
-#include "drawable_proxy_scene.hpp"
+#include "culling.hpp"
+#include "drawable_proxy_manager.hpp"
 #include "font.hpp"
 #include "input/input_dispatcher.hpp"
 #include "input/input_state.hpp"
@@ -18,7 +19,6 @@
 #include "texture.hpp"
 #include "window_dimensions.hpp"
 #include "world.hpp"
-
 
 namespace lumina::core {
 class LuminaEngine;
@@ -163,7 +163,12 @@ private:
   // Flat rendering-side view of current_world, rebuilt by Sync() each frame and
   // consumed by the cull. Single-buffered on purpose: only one frame context is
   // in update at a time, so the cull's inputs never need per-frame copies.
-  DrawableProxyScene drawable_proxy_scene;
+  DrawableProxyManager drawable_proxy_manager;
+
+  // Cull output for the current frame. Persistent so the per-chunk buffers are
+  // sized once rather than reallocated every frame; single-buffered because
+  // only one frame context is in update at a time.
+  BatchedVisibilityIndex visibility_index;
 
   std::unordered_map<std::string, Font> fonts;
   std::unique_ptr<UISystem> ui_system;

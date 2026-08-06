@@ -1,12 +1,12 @@
-#include "drawable_proxy_scene.hpp"
+#include "drawable_proxy_manager.hpp"
 
 #include "components/static_mesh_component.hpp"
 
 namespace lumina::core {
 
-auto DrawableProxyScene::Sync(World &world,
-                              StaticMeshManager &static_mesh_manager,
-                              renderer::LuminaRenderer &renderer) -> void {
+auto DrawableProxyManager::Sync(World &world,
+                                StaticMeshManager &static_mesh_manager,
+                                renderer::LuminaRenderer &renderer) -> void {
   // TODO: first version of render proxy scene, we rebuild the entire scene
   // every frame, later we will optimize it to only rebuild the changed parts.
   center_x.clear();

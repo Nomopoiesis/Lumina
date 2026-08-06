@@ -254,7 +254,7 @@ auto JobManager::ReleaseCounter(Counter *counter) -> void {
 
 auto JobManager::AcquireJob() -> Job * {
   auto *job = job_pool.Acquire();
-  ASSERT(job != nullptr, "Job pool exhausted");
+  LUMINA_CHECK(job != nullptr, "Job pool exhausted");
   allocated_job_count.fetch_add(1, std::memory_order_relaxed);
   return job;
 }
@@ -389,18 +389,36 @@ auto JobManager::PublishPendingWait(FiberContext *parked_fiber) -> void {
 auto JobManager::Signal(Counter *counter) -> void {
   // signal decrements the wait counter, if it reaches 0, we need to resume
   // waiting fibers
-  if (counter->value.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-    // We need to resume waiting fibers
-    while (counter->waiting_count.load(std::memory_order_acquire) > 0) {
-      for (size_t i = 0; i < ArrayCount(counter->waiting_fibers); ++i) {
-        FiberContext *fiber =
-            std::atomic_exchange(&counter->waiting_fibers[i], nullptr);
-        if (fiber != nullptr) {
-          counter->waiting_count.fetch_sub(1, std::memory_order_release);
-          PushToResumeQueue(fiber);
-        }
+  if (counter->value.fetch_sub(1, std::memory_order_acq_rel) != 1) {
+    return;
+  }
+
+  // Collected first, queued afterwards. Queueing a waiter makes it runnable on
+  // any worker, and the first thing it does on waking is ReleaseCounter() —
+  // which resets this counter and hands it back to the pool, possibly straight
+  // into another AllocateCounter. Anything we read or write here after that
+  // point belongs to somebody else.
+  FiberContext *to_resume[MaxCounterWaiters];
+  u32 resume_count = 0;
+
+  while (counter->waiting_count.load(std::memory_order_acquire) > 0) {
+    for (size_t i = 0; i < MaxCounterWaiters; ++i) {
+      FiberContext *fiber =
+          std::atomic_exchange(&counter->waiting_fibers[i], nullptr);
+      if (fiber != nullptr) {
+        counter->waiting_count.fetch_sub(1, std::memory_order_release);
+        // Bounded because WaitForCounter's fast path returns once value hits
+        // zero, so no genuinely new waiter can register past this point.
+        LUMINA_CHECK(resume_count < MaxCounterWaiters,
+                     "More waiters collected than the counter has slots");
+        to_resume[resume_count++] = fiber;
       }
     }
+  }
+
+  // `counter` must not be touched past this line.
+  for (u32 i = 0; i < resume_count; ++i) {
+    PushToResumeQueue(to_resume[i]);
   }
 }
 

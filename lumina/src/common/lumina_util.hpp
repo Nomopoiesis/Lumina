@@ -2,9 +2,10 @@
 
 #include "lumina_assert.hpp"
 #include "lumina_types.hpp"
+#include <atomic>
 #include <cstddef>
 #include <new>
-#include <atomic>
+
 
 #ifdef __cpp_lib_hardware_interference_size
 constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;

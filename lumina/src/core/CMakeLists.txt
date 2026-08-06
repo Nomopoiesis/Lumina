@@ -14,7 +14,8 @@ target_sources(
           vertex_attribute.cpp
           bounding_box.cpp
           frustum.cpp
-          drawable_proxy_scene.cpp
+          culling.cpp
+          drawable_proxy_manager.cpp
           debug_overlay_controller.cpp)
 
 # Uniform interface

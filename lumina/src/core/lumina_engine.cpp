@@ -194,8 +194,8 @@ static auto BuildUIBatch(Clay_RenderCommandArray commands, UISystem &ui_system,
 // Number of test entities populated into the default world. Raise this to
 // stress the render path - entity/transform storage grows on demand, so the
 // only practical limit is frame time (there is no culling yet).
-static constexpr u32 DEBUG_SPAWN_MESH_COUNT = 5000;
-static constexpr f32 DEBUG_SPAWN_RADIUS = 50.0F;
+static constexpr u32 DEBUG_SPAWN_MESH_COUNT = 100000;
+static constexpr f32 DEBUG_SPAWN_RADIUS = 200.0F;
 
 static auto SpawnMeshEntities(World &world, u32 count,
                               StaticMeshHandle mesh_handle,
@@ -440,7 +440,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
       .aspect_ratio = static_cast<f32>(init_info.window_dimensions.width) /
                       static_cast<f32>(init_info.window_dimensions.height),
       .near_plane = 0.1F,
-      .far_plane = 100.0F,
+      .far_plane = 500.0F,
   };
   world.AddComponent<Camera>(entity_id, camera_settings);
 
@@ -578,7 +578,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
     auto *engine = static_cast<LuminaEngine *>(data);
     auto *frame_context = engine->renderer->GetFrameContextForUpdate();
     frame_context->draw_list.clear();
-    engine->drawable_proxy_scene.Sync(
+    engine->drawable_proxy_manager.Sync(
         *engine->current_world, engine->static_mesh_manager, *engine->renderer);
     auto camera_id = engine->current_world->GetActiveCamera();
     auto transform = engine->current_world->GetTransform(camera_id);
@@ -587,42 +587,19 @@ auto LuminaEngine::ExecuteFrame() -> void {
     auto proj = camera.ToProjectionMatrix();
     auto frustum = ExtractFrustumFromMatrix(math::Dot(view, proj));
 
-    auto &proxy_scene = engine->drawable_proxy_scene;
+    auto &proxy_manager = engine->drawable_proxy_manager;
+    auto &visibility = engine->visibility_index;
+    CullProxies(proxy_manager, frustum, visibility);
 
-    // Resolved once rather than per visible proxy: it is the same debug mesh
-    // for every box.
-    renderer::RenderMeshHandle debug_aabb_render_mesh{};
+    AppendDrawCommands(proxy_manager, visibility, frame_context->draw_list);
+
     if (engine->show_bounding_boxes) {
       auto aabb_mesh_opt =
           engine->static_mesh_manager.Get(engine->debug_aabb_mesh_handle);
       if (aabb_mesh_opt.has_value()) {
-        debug_aabb_render_mesh = aabb_mesh_opt.value()->render_mesh_handle;
-      }
-    }
-    const bool draw_debug_aabbs =
-        engine->show_bounding_boxes &&
-        debug_aabb_render_mesh.index != INVALID_RESOURCE_HANDLE_INDEX;
-
-    const auto count = proxy_scene.ProxyCount();
-    for (size_t i = 0; i < count; ++i) {
-      auto aabbce = AABoundingBoxCenterExtent{
-          .center = math::Vec3{proxy_scene.center_x[i], proxy_scene.center_y[i],
-                               proxy_scene.center_z[i]},
-          .extent = math::Vec3{proxy_scene.extent_x[i], proxy_scene.extent_y[i],
-                               proxy_scene.extent_z[i]},
-      };
-      if (TestAABoundingBox(frustum, aabbce) == FrustumTestResult::Outside) {
-        continue;
-      }
-      frame_context->draw_list.emplace_back(renderer::DrawMeshCommand{
-          .render_mesh_handle = proxy_scene.mesh_handle[i],
-          .material_instance = proxy_scene.material[i],
-          .model = proxy_scene.model[i]});
-      if (draw_debug_aabbs) {
-        frame_context->draw_list.emplace_back(renderer::DrawDebugAABBCommand{
-            .render_mesh_handle = debug_aabb_render_mesh,
-            .model = math::Dot(math::ScaleMatrix(aabbce.extent * 2.0F),
-                               math::TranslationMatrix(aabbce.center))});
+        AppendDebugAABBDrawCommands(proxy_manager, visibility,
+                                    aabb_mesh_opt.value()->render_mesh_handle,
+                                    frame_context->draw_list);
       }
     }
   };
