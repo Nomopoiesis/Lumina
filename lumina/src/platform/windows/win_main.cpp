@@ -5,6 +5,7 @@
 #include "vulkan/win_vulkan.hpp"
 #include "win_window.hpp"
 
+#include "core/job_system/job_manager.hpp"
 #include "core/lumina_engine.hpp"
 
 #include "common/logger/logger.hpp"
@@ -42,6 +43,18 @@ auto WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                              /*enable_console_colors*/ true);
 
   LOG_INFO("Logger initialized - Welcome to Lumina!");
+
+  // Process-wide, and brought up before anything that might submit work.
+  // Depends on platform services for fiber creation and thread pinning, so it
+  // has to follow InitPlatformServices. The guard runs after the explicit
+  // engine shutdown below, and also covers the early returns in between.
+  LOG_TRACE("Initializing job system...");
+  lumina::core::job_system::InitializeJobSystem(
+      {.num_workers = 0, .fiber_pool_size = 1024});
+  ScopeGuard job_system_guard([]() -> void {
+    LOG_TRACE("Shutting down job system...");
+    lumina::core::job_system::ShutdownJobSystem();
+  });
 
   LOG_TRACE("Creating window...");
   auto window_result = Window::Create(hInstance, "Lumina", 800, 600);

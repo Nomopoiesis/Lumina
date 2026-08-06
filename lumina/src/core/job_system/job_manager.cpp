@@ -9,9 +9,32 @@
 #include "lumina_types.hpp"
 #include "platform/platform_common/platform_services.hpp"
 
+#include <memory>
 #include <thread>
 
 namespace lumina::core::job_system {
+
+namespace {
+std::unique_ptr<JobManager> g_job_manager; // NOLINT
+} // namespace
+
+auto InitializeJobSystem(JobManagerInitializeInfo initialize_info) -> void {
+  LUMINA_CHECK(g_job_manager == nullptr, "Job system already initialized");
+  g_job_manager = std::make_unique<JobManager>();
+  g_job_manager->Initialize(initialize_info);
+}
+
+auto ShutdownJobSystem() -> void {
+  // ~JobManager runs Shutdown(), which is the single teardown path: it joins
+  // the workers before the pools they draw from are released.
+  g_job_manager.reset();
+}
+
+auto GetJobManager() -> JobManager & {
+  LUMINA_CHECK(g_job_manager != nullptr,
+               "Job system not initialized, call InitializeJobSystem() first");
+  return *g_job_manager;
+}
 
 auto JobManager::Initialize(JobManagerInitializeInfo initialize_info) -> void {
   if (is_initialized_) {

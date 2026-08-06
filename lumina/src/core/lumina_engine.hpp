@@ -13,7 +13,6 @@
 #include "font.hpp"
 #include "input/input_dispatcher.hpp"
 #include "input/input_state.hpp"
-#include "job_system/job_manager.hpp"
 #include "renderer/renderer.hpp"
 #include "static_mesh.hpp"
 #include "texture.hpp"
@@ -154,7 +153,6 @@ private:
   InputDispatcher input_dispatcher;
 
   WindowDimensions window_dimensions{};
-  std::unique_ptr<job_system::JobManager> job_manager = nullptr;
   std::unique_ptr<renderer::LuminaRenderer> renderer = nullptr;
 
   std::unique_ptr<World> current_world;

@@ -178,4 +178,21 @@ private:
   std::atomic<size_t> allocated_job_count = 0;
 };
 
+// The process-wide job system instance.
+//
+// JobManager itself stays an ordinary constructible class: tests build their
+// own on the stack with whatever worker count a case needs. This is only the
+// single instance the engine runs on, exposed here so any subsystem can submit
+// work by including this header alone rather than depending on LuminaEngine.
+//
+// Lifetime is explicit, and the storage is a pointer rather than a function
+// local static, on purpose. Workers are std::threads that Shutdown() joins;
+// leaving that join to static destruction would run it after main() returns.
+// InitializeJobSystem/ShutdownJobSystem are called once each, by the engine.
+auto InitializeJobSystem(JobManagerInitializeInfo initialize_info) -> void;
+auto ShutdownJobSystem() -> void;
+
+// Valid only between InitializeJobSystem and ShutdownJobSystem.
+auto GetJobManager() -> JobManager &;
+
 } // namespace lumina::core::job_system

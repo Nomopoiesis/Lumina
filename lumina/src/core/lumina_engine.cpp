@@ -21,6 +21,7 @@
 #include "font.hpp"
 #include "frustum.hpp"
 #include "input/input_action.hpp"
+#include "job_system/job_manager.hpp"
 #include "math/basic.hpp"
 #include "math/trigonometry.hpp"
 #include "mesh_cache.hpp"
@@ -292,7 +293,6 @@ static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
 
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   auto &instance = GetStaticInstance();
-  // TestJobSystem();
 
   auto font = CreateFont("NaturalMono-Regular.ttf", std::span<const i32>({24}));
   if (!font.has_value()) {
@@ -302,8 +302,6 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   instance.fonts["NaturalMono-Regular"] = std::move(font.value());
 
   instance.window_dimensions = init_info.window_dimensions;
-  instance.job_manager = std::make_unique<job_system::JobManager>();
-  instance.job_manager->Initialize({.num_workers = 0, .fiber_pool_size = 1024});
   instance.renderer =
       std::make_unique<renderer::LuminaRenderer>(init_info.vulkan_init_result);
   instance.renderer->Initialize();
@@ -473,7 +471,6 @@ auto LuminaEngine::Shutdown() -> void {
   auto &instance = GetStaticInstance();
   instance.ui_system->Shutdown();
   instance.renderer->Shutdown();
-  instance.job_manager.reset();
   instance.renderer.reset();
   instance.current_world.reset();
   instance.is_initialized = false;
@@ -523,7 +520,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
         static_mesh_manager.Update(
             static_mesh_handle,
             [](StaticMesh &mesh) -> void { mesh.render_active = true; });
-        auto *job = job_manager->AcquireJob();
+        auto *job = job_system::GetJobManager().AcquireJob();
         job->execute = [static_mesh_handle](void *data) -> void {
           auto *engine = static_cast<LuminaEngine *>(data);
           auto m_opt = engine->static_mesh_manager.Get(static_mesh_handle);
@@ -538,7 +535,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
               });
         };
         job->data = this;
-        job_manager->SubmitJob(job);
+        job_system::GetJobManager().SubmitJob(job);
       });
 
   std::unordered_set<ResourceHandleIndexType> dispatched_texture_uploads;
@@ -553,7 +550,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
     dispatched_texture_uploads.insert(handle.index);
     texture_manager.Update(handle,
                            [](Texture &t) -> void { t.render_active = true; });
-    auto *job = job_manager->AcquireJob();
+    auto *job = job_system::GetJobManager().AcquireJob();
     job->execute = [handle](void *data) -> void {
       auto *engine = static_cast<LuminaEngine *>(data);
       auto t_opt = engine->texture_manager.Get(handle);
@@ -563,19 +560,19 @@ auto LuminaEngine::ExecuteFrame() -> void {
           handle, [rth](Texture &t) -> void { t.render_texture_handle = rth; });
     };
     job->data = this;
-    job_manager->SubmitJob(job);
+    job_system::GetJobManager().SubmitJob(job);
   });
 
-  auto *frame_sync_counter = job_manager->AllocateCounter(2);
-  auto *job = job_manager->AcquireJob();
+  auto *frame_sync_counter = job_system::GetJobManager().AllocateCounter(2);
+  auto *job = job_system::GetJobManager().AcquireJob();
   job->execute = [](void *data) {
     renderer::UpdateFrameUniforms(*static_cast<LuminaEngine *>(data));
   };
   job->data = this;
   job->signal_counter = frame_sync_counter;
-  job_manager->SubmitJob(job);
+  job_system::GetJobManager().SubmitJob(job);
 
-  job = job_manager->AcquireJob();
+  job = job_system::GetJobManager().AcquireJob();
   job->execute = [](void *data) {
     // Build draw list from all StaticMeshComponents with uploaded meshes
     auto *engine = static_cast<LuminaEngine *>(data);
@@ -631,11 +628,11 @@ auto LuminaEngine::ExecuteFrame() -> void {
   };
   job->data = this;
   job->signal_counter = frame_sync_counter;
-  job_manager->SubmitJob(job);
+  job_system::GetJobManager().SubmitJob(job);
 
   input_dispatcher.Dispatch(input_state);
-  job_manager->WaitForCounter(frame_sync_counter);
-  job_manager->ReleaseCounter(frame_sync_counter);
+  job_system::GetJobManager().WaitForCounter(frame_sync_counter);
+  job_system::GetJobManager().ReleaseCounter(frame_sync_counter);
 
   // Build FPS text string - only integer fps and ms up to 2 decimal places
   auto fps_text = std::format("FPS: {} ({:.2f}ms)",
