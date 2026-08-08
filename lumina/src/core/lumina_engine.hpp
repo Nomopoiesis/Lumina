@@ -5,7 +5,9 @@
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/timer.hpp"
+#include "debug_overlay.hpp"
 #include "debug_overlay_controller.hpp"
+#include "frame_stats.hpp"
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "camera_movement_controller.hpp"
@@ -38,6 +40,7 @@ struct LuminaInitializeInfo {
 
 struct FrameTimeInfo {
   f64 delta_time;
+  f64 simulation_delta_time;
   f64 total_time;
 };
 
@@ -100,11 +103,17 @@ public:
   [[nodiscard]] auto GetFrameDeltaTime() const -> f64 {
     return frame_time_info.delta_time;
   }
+  [[nodiscard]] auto GetFrameSimulationDeltaTime() const -> f64 {
+    return frame_time_info.simulation_delta_time;
+  }
   [[nodiscard]] auto GetFrameTotalTime() const -> f64 {
     return frame_time_info.total_time;
   }
   [[nodiscard]] auto GetFrameDeltaTimeF() const -> f32 {
     return static_cast<f32>(frame_time_info.delta_time);
+  }
+  [[nodiscard]] auto GetFrameSimulationDeltaTimeF() const -> f32 {
+    return static_cast<f32>(frame_time_info.simulation_delta_time);
   }
   [[nodiscard]] auto GetFrameTotalTimeF() const -> f32 {
     return static_cast<f32>(frame_time_info.total_time);
@@ -120,6 +129,14 @@ public:
   }
 
   [[nodiscard]] auto GetCurrentWorld() -> World & { return *current_world; }
+
+  [[nodiscard]] auto GetFrameStats() const -> const FrameStats & {
+    return frame_stats;
+  }
+
+  [[nodiscard]] auto GetDebugOverlay() -> DebugOverlay & {
+    return debug_overlay;
+  }
 
   // Prepares the engine state for the next frame
   auto BeginFrame(Timer &timer) -> void;
@@ -145,6 +162,8 @@ private:
   bool show_bounding_boxes = false;
 
   FrameTimeInfo frame_time_info{};
+  FrameStats frame_stats{};
+  DebugOverlay debug_overlay{};
 
   std::unique_ptr<CameraMovementController> camera_movement_controller;
   std::unique_ptr<DebugOverlayController> debug_overlay_controller;
@@ -169,6 +188,10 @@ private:
   // sized once rather than reallocated every frame; single-buffered because
   // only one frame context is in update at a time.
   BatchedVisibilityIndex visibility_index;
+
+  // Counting-sort working set for the draw list build, held here so the two
+  // per-item arrays are allocated once instead of on every frame.
+  DrawListScratch draw_list_scratch;
 
   std::unordered_map<std::string, Font> fonts;
   std::unique_ptr<UISystem> ui_system;

@@ -4,6 +4,7 @@
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "command_context.hpp"
+#include "draw_item_registry.hpp"
 #include "frame_context.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
@@ -20,6 +21,7 @@
 #include "common/data_structures/lock_free_concurrent_queue.hpp"
 #include "common/data_structures/lock_free_object_pool.hpp"
 
+#include <atomic>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -82,6 +84,17 @@ public:
     return frame_context_for_update;
   }
 
+  // Scene draw calls issued by the most recently recorded frame. Counted at
+  // record time rather than taken from draw_list.size(), because commands whose
+  // mesh, pipeline or material is not resolvable are skipped without drawing.
+  // Excludes the UI pass, which this counter is not meant to measure.
+  //
+  // Written by the render thread, read by the update thread: relaxed is enough,
+  // as nothing is ordered against it and a one-frame-stale value is expected.
+  [[nodiscard]] auto GetRecordedDrawCallCount() const noexcept -> u32 {
+    return recorded_draw_call_count.load(std::memory_order_relaxed);
+  }
+
   auto AcquireCommandContext() -> CommandContext &;
 
   auto AddShaderInterface(ShaderInterface &&shader_interface) -> size_t {
@@ -112,6 +125,9 @@ public:
     return material_ubo_buffer;
   }
 
+  auto EnsureInstanceBufferCapacity(FrameContextInstanceBuffer &instance_buffer,
+                                    size_t capacity) -> void;
+
   auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       -> GraphicsPipelineHandle;
 
@@ -122,6 +138,8 @@ public:
 
   auto CreateRenderTexture(const core::Texture &texture) -> RenderTextureHandle;
   auto DestroyRenderTexture(RenderTextureHandle handle) -> void;
+  [[nodiscard]] auto GetRenderMesh(RenderMeshHandle handle) noexcept
+      -> std::optional<const RenderMesh *>;
   [[nodiscard]] auto GetRenderTexture(RenderTextureHandle handle) noexcept
       -> std::optional<const RenderTexture *>;
 
@@ -171,6 +189,10 @@ public:
   [[nodiscard]] auto GetGlobalDescriptorSetLayout() const noexcept
       -> VkDescriptorSetLayout {
     return global_descriptor_set_layout;
+  }
+
+  [[nodiscard]] auto GetDrawItemRegistry() -> DrawItemRegistry & {
+    return draw_item_registry;
   }
 
 private:
@@ -234,6 +256,8 @@ private:
   FrameContext *frame_context_for_update = nullptr;
   FrameContext *frame_context_for_render = nullptr;
 
+  std::atomic<u32> recorded_draw_call_count{0};
+
   std::vector<std::unique_ptr<FrameContext>> frame_contexts;
 
   VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
@@ -269,6 +293,8 @@ private:
   MaterialInstanceManager material_instance_manager;
   GraphicsPipelineManager pipeline_manager;
 
+  DrawItemRegistry draw_item_registry;
+
   VkDescriptorPool persistent_descriptor_pool = VK_NULL_HANDLE;
 
   VkDescriptorSetLayout global_descriptor_set_layout = VK_NULL_HANDLE;
@@ -296,9 +322,9 @@ private:
 
   friend auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
       -> std::expected<void, VkInitializationError>;
-  friend auto WriteLitMaterialDescriptors(LuminaRenderer *renderer,
-                                          MaterialInstanceHandle instance_handle)
-      -> void;
+  friend auto
+  WriteLitMaterialDescriptors(LuminaRenderer *renderer,
+                              MaterialInstanceHandle instance_handle) -> void;
   friend auto UpdateLitMaterialTextures(LuminaRenderer *renderer,
                                         VkSampler sampler,
                                         VkImageView image_view) -> void;

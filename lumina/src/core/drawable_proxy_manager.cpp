@@ -16,8 +16,7 @@ auto DrawableProxyManager::Sync(
   extent_y.clear();
   extent_z.clear();
   model.clear();
-  mesh_handle.clear();
-  material.clear();
+  draw_item_indices.clear();
 
   world.ForEachComponent<components::StaticMeshComponent>(
       [this, &world, &static_mesh_registry,
@@ -38,6 +37,13 @@ auto DrawableProxyManager::Sync(
           return;
         }
 
+        auto render_mesh_opt =
+            renderer.GetRenderMesh(static_mesh->render_mesh_handle);
+        if (!render_mesh_opt.has_value()) {
+          return;
+        }
+        auto &render_mesh = render_mesh_opt.value();
+
         // The mesh AABB is in model space; the frustum planes are in world
         // space, so it has to be transformed here or every proxy would be
         // tested as if it sat at the origin. TransformToCenterExtent is the
@@ -55,15 +61,19 @@ auto DrawableProxyManager::Sync(
         extent_z.push_back(bounds.extent.z);
 
         model.push_back(model_matrix);
-        mesh_handle.push_back(static_mesh->render_mesh_handle);
 
         // Entities created without a material fall back to the renderer's
         // default, so nothing that only sets a mesh has to change.
-        const auto material_instance = component.GetMaterialInstanceHandle();
-        material.push_back(
-            material_instance.index == INVALID_RESOURCE_HANDLE_INDEX
-                ? renderer.GetDefaultMaterialInstanceHandle()
-                : material_instance);
+        auto material_instance = component.GetMaterialInstanceHandle();
+        material_instance =
+            (material_instance.index == INVALID_RESOURCE_HANDLE_INDEX
+                 ? renderer.GetDefaultMaterialInstanceHandle()
+                 : material_instance);
+
+        auto draw_item_index = renderer.GetDrawItemRegistry().AcquireDrawItem(
+            render_mesh->pipeline_handle, material_instance,
+            static_mesh->render_mesh_handle);
+        draw_item_indices.push_back(draw_item_index);
       });
 }
 

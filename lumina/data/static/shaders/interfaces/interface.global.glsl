@@ -17,5 +17,9 @@ layout(set = 0, binding = 0, row_major) uniform FrameGlobals {
 }
 frame_globals;
 
+layout(set = 0, binding = 1, row_major) readonly buffer InstanceData {
+  mat4 models[];
+} instance_data;
+
 layout(push_constant) uniform PushConstants { layout(row_major) mat4 model; }
 pc;

@@ -5,9 +5,10 @@
 #include "../interfaces/simple_model_input.vert.glsl"
 
 void main() {
-  vec4 wolrd_pos = vec4(inPosition, 1.0) * pc.model;
+  mat4 model = instance_data.models[gl_InstanceIndex];
+  vec4 wolrd_pos = vec4(inPosition, 1.0) * model;
   gl_Position = wolrd_pos * frame_globals.view * frame_globals.proj;
   fragWorldPosition = wolrd_pos.xyz;
-  fragWorldNormal = normalize(inNormal * mat3(pc.model));
+  fragWorldNormal = normalize(inNormal * mat3(model));
   fragTexCoord = inTexCoord;
 }

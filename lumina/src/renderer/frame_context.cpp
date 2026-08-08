@@ -55,6 +55,17 @@ FrameContext::~FrameContext() noexcept {
   if (uniform_buffer.memory != VK_NULL_HANDLE) {
     vkFreeMemory(vulkan_context.GetDevice(), uniform_buffer.memory, nullptr);
   }
+
+  if (instance_buffer.mapped != nullptr) {
+    vkUnmapMemory(vulkan_context.GetDevice(), instance_buffer.memory);
+  }
+  if (instance_buffer.buffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(vulkan_context.GetDevice(), instance_buffer.buffer,
+                    nullptr);
+  }
+  if (instance_buffer.memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), instance_buffer.memory, nullptr);
+  }
 }
 
 auto FrameContext::Create(VulkanContext &vulkan_context,

@@ -1,8 +1,17 @@
 #pragma once
 
-#include "renderer.hpp"
+#include "material_instance_handle.hpp"
+#include "math/vector.hpp"
+#include "vulkan_context.hpp"
+
+#include <expected>
+#include <vector>
+#include <vulkan/vulkan.h>
 
 namespace lumina::renderer {
+
+class LuminaRenderer;
+class FrameContext;
 
 auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void;
 
@@ -32,7 +41,8 @@ auto WriteLitMaterialDescriptors(LuminaRenderer *renderer,
 // Re-writes the texture binding of *every* lit material instance. All of them
 // share one texture, so an upload completing has to reach all of them — not
 // just the default, or later instances keep a stale image view.
-// Safe to call from the render thread (e.g. a command-context completion callback).
+// Safe to call from the render thread (e.g. a command-context completion
+// callback).
 auto UpdateLitMaterialTextures(LuminaRenderer *renderer, VkSampler sampler,
                                VkImageView image_view) -> void;
 

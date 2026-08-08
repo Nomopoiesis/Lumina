@@ -7,6 +7,7 @@
 #include "headers/position_only.vert.hpp"
 #include "headers/simple_input_basic_mat.frag.hpp"
 #include "headers/simple_model_input.vert.hpp"
+#include "renderer.hpp"
 
 #include "shaders/shader_vk_helpers.hpp"
 
@@ -72,18 +73,16 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
       .shader_interface_index = dbg_interface_index,
       .vertex_layout = dbg_vert::kLayout,
       .fragment_layout = dbg_frag::kLayout,
-      .vertex_shader_bin_path =
-          lumina::common::PathRegistry::Instance()
-              .shaders.Resolve("debug_wireframe.vert.spv")
-              .string(),
+      .vertex_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                    .shaders.Resolve("debug_wireframe.vert.spv")
+                                    .string(),
       .fragment_shader_bin_path =
           lumina::common::PathRegistry::Instance()
               .shaders.Resolve("debug_wireframe.frag.spv")
               .string(),
       .max_instances = 0,
   };
-  auto dbg_mat_template_handle =
-      renderer->CreateMaterialTemplate(dbg_mat_desc);
+  auto dbg_mat_template_handle = renderer->CreateMaterialTemplate(dbg_mat_desc);
 
   renderer->SetDebugWireframeMaterialTemplate(dbg_mat_template_handle);
 }
@@ -191,8 +190,8 @@ namespace {
 // Shared by every write path: the only thing that differs between instances is
 // which slice of the uniform buffer their descriptors point at.
 auto WriteLitDescriptorsFor(LuminaRenderer *renderer,
-                            const MaterialInstance &instance,
-                            VkSampler sampler, VkImageView image_view) -> void {
+                            const MaterialInstance &instance, VkSampler sampler,
+                            VkImageView image_view) -> void {
   namespace mat = shaders::simple_input_basic_mat::frag;
 
   mat::BindingData bindings{
@@ -218,8 +217,7 @@ auto SetLitMaterialDiffuseColor(LuminaRenderer *renderer,
                                 const math::Vec3 &diffuse_color) -> void {
   using MU = shaders::simple_input_basic_mat::frag::MaterialUniforms;
 
-  auto instance_opt =
-      renderer->material_instance_manager.Get(instance_handle);
+  auto instance_opt = renderer->material_instance_manager.Get(instance_handle);
   LUMINA_CHECK(instance_opt.has_value(), "Material instance not found");
 
   auto *uniforms = static_cast<MU *>(
@@ -230,8 +228,7 @@ auto SetLitMaterialDiffuseColor(LuminaRenderer *renderer,
 auto WriteLitMaterialDescriptors(LuminaRenderer *renderer,
                                  MaterialInstanceHandle instance_handle)
     -> void {
-  auto instance_opt =
-      renderer->material_instance_manager.Get(instance_handle);
+  auto instance_opt = renderer->material_instance_manager.Get(instance_handle);
   LUMINA_CHECK(instance_opt.has_value(), "Material instance not found");
 
   WriteLitDescriptorsFor(renderer, *instance_opt.value(),
@@ -244,9 +241,9 @@ auto UpdateLitMaterialTextures(LuminaRenderer *renderer, VkSampler sampler,
   const auto lit_template = renderer->default_material_template_handle;
 
   renderer->material_instance_manager.ForEach(
-      [renderer, sampler, image_view, lit_template](
-          MaterialInstanceHandle /*handle*/,
-          MaterialInstance &instance) -> void {
+      [renderer, sampler, image_view,
+       lit_template](MaterialInstanceHandle /*handle*/,
+                     MaterialInstance &instance) -> void {
         // Instances of other templates have their own bindings and must not be
         // written with this layout's BindingData.
         if (instance.GetTemplateHandle() != lit_template) {
@@ -285,7 +282,8 @@ auto WriteTransientDescriptors(LuminaRenderer *renderer,
   namespace global = shaders::interface::global;
   global::WriteDescriptors(
       renderer->vulkan_context.GetDevice(), descriptor_set,
-      {.frame_globals_buffer = frame_context.GetUniformBuffer().buffer});
+      {.frame_globals_buffer = frame_context.GetUniformBuffer().buffer,
+       .instance_data_buffer = frame_context.GetInstanceBuffer().buffer});
 }
 
 } // namespace lumina::renderer

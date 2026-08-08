@@ -12,6 +12,10 @@ auto DebugOverlayController::HandleInput(
         ActionID(std::string_view("ToggleBoundingBoxView"))) {
       engine.ToggleBoundingBoxView();
     }
+    if (action_event.action_id ==
+        ActionID(std::string_view("ToggleDebugOverlay"))) {
+      engine.GetDebugOverlay().Toggle();
+    }
   }
 }
 

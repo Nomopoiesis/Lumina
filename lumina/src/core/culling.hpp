@@ -17,25 +17,6 @@ inline constexpr size_t CullBatchSize = 1024;
 auto CullProxies(const DrawableProxyManager &proxies, const Frustum &frustum,
                  BatchedVisibilityIndex &visibility) -> void;
 
-// Appends one DrawMeshCommand per visible proxy, walking chunks in index order
-// so the resulting draw list is deterministic.
-auto AppendDrawCommands(const DrawableProxyManager &proxies,
-                        const BatchedVisibilityIndex &visibility,
-                        std::vector<renderer::DrawCommand> &draw_list) -> void;
-
-// Appends one DrawDebugAABBCommand per visible proxy, using `debug_mesh` as the
-// wireframe box.
-//
-// Deliberately a separate pass rather than a flag threaded through the cull:
-// visibility and debug visualization are unrelated concerns, and the renderer
-// binds a pipeline per draw command, so emitting all the mesh commands before
-// all the debug ones stops it alternating pipelines on every single draw.
-auto AppendDebugAABBDrawCommands(const DrawableProxyManager &proxies,
-                                 const BatchedVisibilityIndex &visibility,
-                                 renderer::RenderMeshHandle debug_mesh,
-                                 std::vector<renderer::DrawCommand> &draw_list)
-    -> void;
-
 #if 0 // NOLINT
 // Single-threaded reference implementation, kept so the two can be A/B timed.
 // It fills `visibility` identically, chunk for chunk, so everything downstream

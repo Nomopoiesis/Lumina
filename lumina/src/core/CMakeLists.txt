@@ -16,6 +16,7 @@ target_sources(
           frustum.cpp
           culling.cpp
           drawable_proxy_manager.cpp
+          debug_overlay.cpp
           debug_overlay_controller.cpp
           static_mesh_manager.cpp)
 

@@ -11,7 +11,6 @@
 #include "vulkan_context.hpp"
 
 #include <memory>
-#include <variant>
 #include <vector>
 
 namespace lumina::renderer {
@@ -30,18 +29,22 @@ enum class FrameContextPipelineState : u8 {
   RENDER_COMPLETE,
 };
 
-struct DrawMeshCommand {
-  RenderMeshHandle render_mesh_handle;
-  MaterialInstanceHandle material_instance;
-  math::Mat4 model;
+// One instanced draw: everything to bind comes from the draw item, and the
+// instances occupy [first_instance, first_instance + instance_count) in the
+// frame's instance buffer.
+struct DrawMeshBatch {
+  u32 draw_item_index;
+  u32 first_instance;
+  u32 instance_count;
 };
 
+// Debug wireframe boxes are still one draw per object with the model matrix in
+// a push constant. They keep their own list rather than sharing the batch path
+// because their template has no material instances and no set 1.
 struct DrawDebugAABBCommand {
   RenderMeshHandle render_mesh_handle;
   math::Mat4 model;
 };
-
-using DrawCommand = std::variant<DrawMeshCommand, DrawDebugAABBCommand>;
 
 struct FrameContextUniformBuffer {
   FrameContextUniformBuffer() noexcept = default;
@@ -57,6 +60,23 @@ struct FrameContextUniformBuffer {
   VkBuffer buffer = VK_NULL_HANDLE;
   VkDeviceMemory memory = VK_NULL_HANDLE;
   void *mapped = nullptr;
+};
+
+struct FrameContextInstanceBuffer {
+  FrameContextInstanceBuffer() noexcept = default;
+  FrameContextInstanceBuffer(const FrameContextInstanceBuffer &) = delete;
+  auto operator=(const FrameContextInstanceBuffer &)
+      -> FrameContextInstanceBuffer & = delete;
+  FrameContextInstanceBuffer(FrameContextInstanceBuffer &&other) noexcept =
+      default;
+  auto operator=(FrameContextInstanceBuffer &&other) noexcept
+      -> FrameContextInstanceBuffer & = default;
+  ~FrameContextInstanceBuffer() noexcept = default;
+
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  void *mapped = nullptr;
+  u32 capacity = 0;
 };
 
 class FrameContext {
@@ -123,8 +143,17 @@ public:
     return uniform_buffer;
   }
 
+  auto GetInstanceBuffer() noexcept -> FrameContextInstanceBuffer & {
+    return instance_buffer;
+  }
+
   UIRenderBatch ui_batch;
-  std::vector<DrawCommand> draw_list;
+
+  // Both are cleared and refilled every frame rather than freed, so the steady
+  // state allocates nothing. Recorded in this order: opaque batches first, then
+  // debug wireframes on top.
+  std::vector<DrawMeshBatch> draw_batches;
+  std::vector<DrawDebugAABBCommand> debug_draws;
 
 private:
   VulkanContext &vulkan_context;
@@ -137,6 +166,7 @@ private:
   VkDescriptorSet frame_transient_descriptor_set = VK_NULL_HANDLE;
 
   FrameContextUniformBuffer uniform_buffer;
+  FrameContextInstanceBuffer instance_buffer;
 };
 
 } // namespace lumina::renderer

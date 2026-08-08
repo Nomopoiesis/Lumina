@@ -17,7 +17,8 @@ public:
   BatchedVisibilityIndex(size_t proxy_count, size_t batch_size) noexcept
       : chunked_visibility_index(proxy_count),
         chunked_visibility_index_batch_size((proxy_count + batch_size - 1) /
-                                            batch_size) {}
+                                            batch_size),
+        batch_size_{batch_size} {}
   BatchedVisibilityIndex(const BatchedVisibilityIndex &) noexcept = delete;
   auto operator=(const BatchedVisibilityIndex &) noexcept
       -> BatchedVisibilityIndex & = delete;
@@ -33,10 +34,13 @@ public:
     chunked_visibility_index.resize(proxy_count);
     chunked_visibility_index_batch_size.resize((proxy_count + batch_size - 1) /
                                                batch_size);
+    batch_size_ = batch_size;
+    visible_count = 0;
   }
 
   auto SetVisibleIndex(size_t index, size_t visible_index) -> void {
     chunked_visibility_index[index] = visible_index;
+    visible_count++;
   }
   auto SetChunkSize(size_t chunk_index, size_t batch_size) -> void {
     chunked_visibility_index_batch_size[chunk_index] = batch_size;
@@ -50,10 +54,34 @@ public:
   [[nodiscard]] auto GetChunkCount() const -> size_t {
     return chunked_visibility_index_batch_size.size();
   }
+  [[nodiscard]] auto GetVisibleCount() const -> size_t { return visible_count; }
+
+  template <typename F>
+  auto ForEachVisible(F &&emit) const -> void {
+    for (size_t chunk = 0; chunk < GetChunkCount(); ++chunk) {
+      const size_t base = chunk * batch_size_;
+      const size_t visible = GetChunkSize(chunk);
+      for (size_t n = 0; n < visible; ++n) {
+        emit(GetVisibleIndex(base + n));
+      }
+    }
+  }
 
 private:
+  size_t batch_size_ = 0;
   std::vector<size_t> chunked_visibility_index;
   std::vector<size_t> chunked_visibility_index_batch_size;
+  size_t visible_count = 0;
+};
+
+// Per-draw-item working arrays for the counting sort that groups visible
+// proxies into batches. Both are indexed by draw item id and are as small as
+// the registry, so keeping them alive between frames costs almost nothing and
+// removes two allocations from the frame.
+struct DrawListScratch {
+  std::vector<u32> counts;
+  // Each item's start offset before the scatter, and its write cursor during.
+  std::vector<u32> offsets;
 };
 
 // Rendering-side representation of the scene: a flat SoA snapshot of everything
@@ -80,6 +108,14 @@ public:
             renderer::LuminaRenderer &renderer) -> void;
   [[nodiscard]] auto ProxyCount() const -> size_t { return center_x.size(); }
 
+  [[nodiscard]] auto GetProxyAABB(size_t index) const
+      -> AABoundingBoxCenterExtent {
+    return {
+        .center = math::Vec3{center_x[index], center_y[index], center_z[index]},
+        .extent = math::Vec3{extent_x[index], extent_y[index], extent_z[index]},
+    };
+  }
+
   // Parallel arrays, indexed together. Cleared rather than freed between
   // frames, so the steady state performs no allocation.
   //
@@ -89,8 +125,7 @@ public:
   std::vector<f32> extent_x, extent_y, extent_z;
 
   std::vector<math::Mat4> model;
-  std::vector<renderer::RenderMeshHandle> mesh_handle;
-  std::vector<renderer::MaterialInstanceHandle> material;
+  std::vector<u32> draw_item_indices;
 };
 
 } // namespace lumina::core

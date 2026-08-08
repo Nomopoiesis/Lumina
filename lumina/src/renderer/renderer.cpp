@@ -6,17 +6,17 @@
 #include "common/lumina_check.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/path_registry.hpp"
-#include "vk_check.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
 #include "material_template.hpp"
+#include "math/basic.hpp"
+#include "shaders/shader_gen/static_shader_api.hpp"
 #include "shaders/shader_module_cache.hpp"
 #include "shaders/shader_vk_helpers.hpp"
 #include "vertex_layout.hpp"
 #include "vertex_serializer.hpp"
-
-#include "shaders/shader_gen/static_shader_api.hpp"
+#include "vk_check.hpp"
 
 #include <vulkan/vk_enum_string_helper.h>
 
@@ -459,6 +459,24 @@ static auto CreateUniformBuffer(VulkanContext &vulkan_context,
   }
 
   vkMapMemory(vulkan_context.GetDevice(), memory, 0, size, 0, &mapped_data);
+  return true;
+}
+
+static auto CreateInstanceBuffer(VulkanContext &vulkan_context,
+                                 FrameContextInstanceBuffer &instance_buffer,
+                                 u32 capacity) -> bool {
+  VkDeviceSize size = capacity * sizeof(math::Mat4);
+  if (!CreateBuffer(vulkan_context, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                    VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    instance_buffer.memory, instance_buffer.buffer)) {
+    LOG_ERROR("Failed to create instance buffer");
+    return false;
+  }
+  vkMapMemory(vulkan_context.GetDevice(), instance_buffer.memory, 0, size, 0,
+              &instance_buffer.mapped);
+  instance_buffer.capacity = capacity;
   return true;
 }
 
@@ -985,6 +1003,9 @@ auto LuminaRenderer::Initialize() -> void {
         vulkan_context, uniform_buffer.memory, uniform_buffer.buffer,
         uniform_buffer.mapped, GetFrameGlobalsBufferSize());
     LUMINA_CHECK(uniform_buffer_result, "Failed to create uniform buffer");
+    auto instance_buffer_result = CreateInstanceBuffer(
+        vulkan_context, frame_contexts[i]->GetInstanceBuffer(), 4096);
+    LUMINA_CHECK(instance_buffer_result, "Failed to create instance buffer");
   }
 
   auto desc_pool_result = CreateDescriptorPools();
@@ -1817,94 +1838,97 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
       command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, global_pipeline_layout,
       0, 1, &frame_context.GetTransientDescriptorSet(), 0, nullptr);
 
-  for (const auto &draw_command : frame_context.draw_list) {
-    std::visit(
-        [&](const auto &cmd) {
-          using T = std::decay_t<decltype(cmd)>;
+  // Accumulated locally and published once below: an atomic increment per draw
+  // would put contended traffic in the hottest loop in the renderer.
+  u32 draw_calls = 0;
 
-          if constexpr (std::is_same_v<T, DrawMeshCommand>) {
-            auto render_mesh_opt =
-                render_mesh_manager.Get(cmd.render_mesh_handle);
-            if (!render_mesh_opt.has_value() ||
-                !render_mesh_opt.value()->ready) {
-              return;
-            }
-            const auto &render_mesh = render_mesh_opt.value();
-            auto pipeline_opt =
-                pipeline_manager.Get(render_mesh->pipeline_handle);
-            if (!pipeline_opt.has_value()) {
-              return;
-            }
-            auto &pipeline = pipeline_opt.value();
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              pipeline->vk_pipeline);
-            auto material_instance_opt =
-                material_instance_manager.Get(cmd.material_instance);
-            if (!material_instance_opt.has_value()) {
-              return;
-            }
-            auto &material_instance = material_instance_opt.value();
-            auto material_template_opt = material_template_manager.Get(
-                material_instance->GetTemplateHandle());
-            if (!material_template_opt.has_value()) {
-              return;
-            }
-            auto &material_template = material_template_opt.value();
-            auto &si = GetShaderInterfaceFor(*material_template);
-            vkCmdBindDescriptorSets(
-                command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                si.GetPipelineLayout(), 1, 1,
-                &material_instance->GetDescriptorSet(current_frame_index), 0,
-                nullptr);
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(command_buffer, 0, 1,
-                                   &render_mesh->vertex_streams[0].buffer,
-                                   offsets);
-            vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
-                                 VK_INDEX_TYPE_UINT16);
-            vkCmdPushConstants(command_buffer, si.GetPipelineLayout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0,
-                               sizeof(math::Mat4), &cmd.model);
-            vkCmdDrawIndexed(command_buffer,
-                             static_cast<u32>(render_mesh->index_count), 1, 0,
-                             0, 0);
+  for (const auto &batch : frame_context.draw_batches) {
+    const auto draw_item = draw_item_registry.Get(batch.draw_item_index);
 
-          } else if constexpr (std::is_same_v<T, DrawDebugAABBCommand>) {
-            auto pipeline_opt =
-                pipeline_manager.Get(debug_aabb_pipeline_handle);
-            auto render_mesh_opt =
-                render_mesh_manager.Get(cmd.render_mesh_handle);
-            if (!pipeline_opt.has_value() || !render_mesh_opt.has_value() ||
-                !render_mesh_opt.value()->ready) {
-              return;
-            }
-            auto &pipeline = pipeline_opt.value();
-            const auto &render_mesh = render_mesh_opt.value();
-            auto material_template_opt = material_template_manager.Get(
-                debug_wireframe_material_template_handle);
-            if (!material_template_opt.has_value()) {
-              return;
-            }
-            auto &material_template = material_template_opt.value();
-            auto &dbg_si = GetShaderInterfaceFor(*material_template);
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              pipeline->vk_pipeline);
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(command_buffer, 0, 1,
-                                   &render_mesh->vertex_streams[0].buffer,
-                                   offsets);
-            vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
-                                 VK_INDEX_TYPE_UINT16);
-            vkCmdPushConstants(command_buffer, dbg_si.GetPipelineLayout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0,
-                               sizeof(math::Mat4), &cmd.model);
-            vkCmdDrawIndexed(command_buffer,
-                             static_cast<u32>(render_mesh->index_count), 1, 0,
-                             0, 0);
-          }
-        },
-        draw_command);
+    auto render_mesh_opt =
+        render_mesh_manager.Get(draw_item.render_mesh_handle);
+    if (!render_mesh_opt.has_value() || !render_mesh_opt.value()->ready) {
+      continue;
+    }
+    const auto &render_mesh = render_mesh_opt.value();
+
+    auto pipeline_opt = pipeline_manager.Get(draw_item.pipeline_handle);
+    if (!pipeline_opt.has_value()) {
+      continue;
+    }
+    auto &pipeline = pipeline_opt.value();
+
+    auto material_instance_opt =
+        material_instance_manager.Get(draw_item.material_instance_handle);
+    if (!material_instance_opt.has_value()) {
+      continue;
+    }
+    auto &material_instance = material_instance_opt.value();
+
+    auto material_template_opt =
+        material_template_manager.Get(material_instance->GetTemplateHandle());
+    if (!material_template_opt.has_value()) {
+      continue;
+    }
+    auto &material_template = material_template_opt.value();
+    auto &si = GetShaderInterfaceFor(*material_template);
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipeline->vk_pipeline);
+    vkCmdBindDescriptorSets(
+        command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, si.GetPipelineLayout(),
+        1, 1, &material_instance->GetDescriptorSet(current_frame_index), 0,
+        nullptr);
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                           &render_mesh->vertex_streams[0].buffer, offsets);
+    vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
+                         VK_INDEX_TYPE_UINT16);
+
+    // No push constant: the vertex shader indexes the instance buffer with
+    // gl_InstanceIndex, which Vulkan defines as firstInstance + instance
+    // number, so first_instance selects this batch's slice for free.
+    vkCmdDrawIndexed(command_buffer,
+                     static_cast<u32>(render_mesh->index_count),
+                     batch.instance_count, 0, 0, batch.first_instance);
+    ++draw_calls;
   }
+
+  for (const auto &debug_draw : frame_context.debug_draws) {
+    auto pipeline_opt = pipeline_manager.Get(debug_aabb_pipeline_handle);
+    auto render_mesh_opt =
+        render_mesh_manager.Get(debug_draw.render_mesh_handle);
+    if (!pipeline_opt.has_value() || !render_mesh_opt.has_value() ||
+        !render_mesh_opt.value()->ready) {
+      continue;
+    }
+    auto &pipeline = pipeline_opt.value();
+    const auto &render_mesh = render_mesh_opt.value();
+
+    auto material_template_opt = material_template_manager.Get(
+        debug_wireframe_material_template_handle);
+    if (!material_template_opt.has_value()) {
+      continue;
+    }
+    auto &material_template = material_template_opt.value();
+    auto &dbg_si = GetShaderInterfaceFor(*material_template);
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipeline->vk_pipeline);
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                           &render_mesh->vertex_streams[0].buffer, offsets);
+    vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
+                         VK_INDEX_TYPE_UINT16);
+    vkCmdPushConstants(command_buffer, dbg_si.GetPipelineLayout(),
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
+                       &debug_draw.model);
+    vkCmdDrawIndexed(command_buffer,
+                     static_cast<u32>(render_mesh->index_count), 1, 0, 0, 0);
+    ++draw_calls;
+  }
+
+  recorded_draw_call_count.store(draw_calls, std::memory_order_relaxed);
 
   vkCmdEndRendering(command_buffer);
 
@@ -2093,8 +2117,7 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
 
   auto image_view_result = vulkan_context.CreateImageView(
       render_texture.image, vk_format, VK_IMAGE_ASPECT_COLOR_BIT);
-  LUMINA_CHECK(image_view_result,
-               "Failed to create render texture image view");
+  LUMINA_CHECK(image_view_result, "Failed to create render texture image view");
   render_texture.image_view = image_view_result.value();
 
   VkSamplerCreateInfo sampler_info = {};
@@ -2160,9 +2183,45 @@ auto LuminaRenderer::DestroyRenderTexture(RenderTextureHandle handle) -> void {
       });
 }
 
+// A ceiling on runaway growth rather than a scene limit: at 64 bytes per
+// instance this is 16 MB per frame context, well above any visible set the
+// current cull can produce.
+static constexpr size_t MAX_INSTANCE_BUFFER_CAPACITY = 1U << 18U;
+
+auto LuminaRenderer::EnsureInstanceBufferCapacity(
+    FrameContextInstanceBuffer &instance_buffer, size_t capacity) -> void {
+  if (instance_buffer.capacity >= capacity) {
+    return;
+  }
+  LUMINA_CHECK(capacity <= MAX_INSTANCE_BUFFER_CAPACITY,
+               "Instance buffer capacity exceeds maximum");
+
+  // Geometric growth so a steadily rising visible count stops reallocating
+  // after a few frames. Computed before the destroy, while capacity still holds
+  // the old size.
+  const auto new_capacity =
+      math::Max(capacity, static_cast<size_t>(instance_buffer.capacity) * 2UZ);
+
+  // Destroying here is safe only because a frame context is handed out for
+  // update after TryReclaimFrameContexts saw its fence signalled, so the GPU has
+  // finished reading the old buffer.
+  vkUnmapMemory(vulkan_context.GetDevice(), instance_buffer.memory);
+  vkDestroyBuffer(vulkan_context.GetDevice(), instance_buffer.buffer, nullptr);
+  vkFreeMemory(vulkan_context.GetDevice(), instance_buffer.memory, nullptr);
+
+  LUMINA_CHECK(CreateInstanceBuffer(vulkan_context, instance_buffer,
+                                    static_cast<u32>(new_capacity)),
+               "Failed to create instance buffer");
+}
+
 auto LuminaRenderer::GetRenderTexture(RenderTextureHandle handle) noexcept
     -> std::optional<const RenderTexture *> {
   return render_texture_manager.Get(handle);
+}
+
+auto LuminaRenderer::GetRenderMesh(RenderMeshHandle handle) noexcept
+    -> std::optional<const RenderMesh *> {
+  return render_mesh_manager.Get(handle);
 }
 
 } // namespace lumina::renderer

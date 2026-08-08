@@ -16,13 +16,14 @@ target_sources(
           material_instance.cpp
           material_template.cpp
           vertex_serializer.cpp
+          draw_item_registry.cpp
           ui_renderer.cpp
           shaders/shader_module_cache.cpp
           shaders/shader_interface.cpp
           shaders/shader_gen/static_shader_api.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/../core/vertex_attribute.cpp)
 
-target_link_libraries(lumina_renderer
-                      PRIVATE lumina_common lumina_common_terminate lumina_stb
-                              lumina_path_registry)
+target_link_libraries(
+  lumina_renderer PRIVATE lumina_common lumina_common_terminate lumina_stb
+                          lumina_path_registry)
 target_link_libraries(lumina_renderer PUBLIC Vulkan::Vulkan glm::glm)

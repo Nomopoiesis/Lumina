@@ -1,7 +1,6 @@
 #include "lumina_engine.hpp"
 
 #include <array>
-#include <format>
 #include <span>
 #include <unordered_set>
 #include <vector>
@@ -329,6 +328,77 @@ static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
   input_action_map.BindAction(
       ActionID(std::string_view("ToggleBoundingBoxView")),
       KeyInputBinding(KeyCode::F3, KeyState::Pressed));
+
+  input_action_map.BindAction(ActionID(std::string_view("ToggleDebugOverlay")),
+                              KeyInputBinding(KeyCode::F1, KeyState::Pressed));
+}
+
+// Groups the visible proxies into one instanced batch per draw item, using a
+// counting sort: tally per item, prefix sum to get each item's slice offset,
+// then scatter the model matrices into their slices.
+//
+// A comparison sort is unnecessary because draw item ids are dense, and the
+// grouping is all that matters — nothing downstream cares what order the items
+// themselves come out in.
+static auto BuildDrawList(const DrawableProxyManager &proxies,
+                          const BatchedVisibilityIndex &visibility,
+                          const renderer::DrawItemRegistry &draw_item_registry,
+                          std::span<math::Mat4> instances,
+                          DrawListScratch &scratch,
+                          std::vector<renderer::DrawMeshBatch> &batches)
+    -> void {
+  const auto item_count = draw_item_registry.GetCount();
+
+  scratch.counts.assign(item_count, 0);
+  visibility.ForEachVisible([&](size_t proxy_index) -> void {
+    ++scratch.counts[proxies.draw_item_indices[proxy_index]];
+  });
+
+  // Exclusive prefix sum: offsets[i] is where item i's instances begin.
+  scratch.offsets.resize(item_count);
+  u32 running = 0;
+  for (size_t i = 0; i < item_count; ++i) {
+    scratch.offsets[i] = running;
+    running += scratch.counts[i];
+  }
+  LUMINA_CHECK(running <= instances.size(),
+               "Instance buffer smaller than the visible set");
+
+  // Emitted before the scatter, while offsets still hold each item's start
+  // rather than its write cursor.
+  batches.clear();
+  for (u32 item_index = 0; item_index < item_count; ++item_index) {
+    if (scratch.counts[item_index] == 0) {
+      // Registered, but nothing visible uses it this frame. Emitting it would
+      // be a zero-instance draw that still inflates the draw call count.
+      continue;
+    }
+    batches.push_back(renderer::DrawMeshBatch{
+        .draw_item_index = item_index,
+        .first_instance = scratch.offsets[item_index],
+        .instance_count = scratch.counts[item_index],
+    });
+  }
+
+  visibility.ForEachVisible([&](size_t proxy_index) -> void {
+    const u32 item_index = proxies.draw_item_indices[proxy_index];
+    instances[scratch.offsets[item_index]++] = proxies.model[proxy_index];
+  });
+}
+
+static auto BuildDebugAABBDrawList(
+    const DrawableProxyManager &proxies,
+    const BatchedVisibilityIndex &visibility,
+    renderer::RenderMeshHandle debug_mesh,
+    std::vector<renderer::DrawDebugAABBCommand> &debug_draws) -> void {
+  debug_draws.clear();
+  visibility.ForEachVisible([&](size_t index) -> void {
+    const auto bounds = proxies.GetProxyAABB(index);
+    debug_draws.emplace_back(renderer::DrawDebugAABBCommand{
+        .render_mesh_handle = debug_mesh,
+        .model = math::Dot(math::ScaleMatrix(bounds.extent * 2.0F),
+                           math::TranslationMatrix(bounds.center))});
+  });
 }
 
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
@@ -432,8 +502,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   // After renderer initialization: instance creation writes descriptor sets and
   // flushes deferred resource operations, which is only safe before frames
   // start.
-  const auto scene_materials =
-      CreateDebugMaterialInstances(*instance.renderer);
+  const auto scene_materials = CreateDebugMaterialInstances(*instance.renderer);
 
   // Create the default world (scene)
   instance.current_world = std::make_unique<World>();
@@ -491,10 +560,11 @@ auto LuminaEngine::BeginFrame(Timer &timer) -> void {
   renderer->AcquireFrameContextForUpdate();
   ui_system->BeginLayout(window_dimensions.width, window_dimensions.height);
   auto delta_time = timer.Tick();
-  // Clamp the delta time to 0.1 seconds to prevent large jumps in time
-  delta_time = math::Clamp(delta_time, 0.0, 0.1);
   frame_time_info.delta_time = delta_time;
+  // Clamp the delta time to 0.1 seconds to prevent large jumps in time
+  frame_time_info.simulation_delta_time = math::Clamp(delta_time, 0.0, 0.1);
   frame_time_info.total_time += delta_time;
+  frame_stats.Update(delta_time);
 }
 
 auto LuminaEngine::ProcessDeferredOperations() -> void {
@@ -588,7 +658,8 @@ auto LuminaEngine::ExecuteFrame() -> void {
     // Build draw list from all StaticMeshComponents with uploaded meshes
     auto *engine = static_cast<LuminaEngine *>(data);
     auto *frame_context = engine->renderer->GetFrameContextForUpdate();
-    frame_context->draw_list.clear();
+    frame_context->draw_batches.clear();
+    frame_context->debug_draws.clear();
     engine->drawable_proxy_manager.Sync(
         *engine->current_world, engine->static_mesh_manager.GetRegistry(),
         *engine->renderer);
@@ -603,15 +674,28 @@ auto LuminaEngine::ExecuteFrame() -> void {
     auto &visibility = engine->visibility_index;
     CullProxies(proxy_manager, frustum, visibility);
 
-    AppendDrawCommands(proxy_manager, visibility, frame_context->draw_list);
+    engine->renderer->EnsureInstanceBufferCapacity(
+        frame_context->GetInstanceBuffer(), visibility.GetVisibleCount());
+
+    // The span is built here rather than inside BuildDrawList so the draw list
+    // build stays a core function writing into plain memory, with no knowledge
+    // of Vulkan buffers.
+    auto &instance_buffer = frame_context->GetInstanceBuffer();
+    std::span<math::Mat4> instances{
+        static_cast<math::Mat4 *>(instance_buffer.mapped),
+        instance_buffer.capacity};
+
+    BuildDrawList(proxy_manager, visibility,
+                  engine->renderer->GetDrawItemRegistry(), instances,
+                  engine->draw_list_scratch, frame_context->draw_batches);
 
     if (engine->show_bounding_boxes) {
       auto aabb_mesh_opt =
           engine->static_mesh_manager.Get(engine->debug_aabb_mesh_handle);
       if (aabb_mesh_opt.has_value()) {
-        AppendDebugAABBDrawCommands(proxy_manager, visibility,
-                                    aabb_mesh_opt.value()->render_mesh_handle,
-                                    frame_context->draw_list);
+        BuildDebugAABBDrawList(proxy_manager, visibility,
+                               aabb_mesh_opt.value()->render_mesh_handle,
+                               frame_context->debug_draws);
       }
     }
   };
@@ -623,24 +707,11 @@ auto LuminaEngine::ExecuteFrame() -> void {
   job_system::GetJobManager().WaitForCounter(frame_sync_counter);
   job_system::GetJobManager().ReleaseCounter(frame_sync_counter);
 
-  // Build FPS text string - only integer fps and ms up to 2 decimal places
-  auto fps_text = std::format("FPS: {} ({:.2f}ms)",
-                              static_cast<int>(1.0F / GetFrameDeltaTime()),
-                              GetFrameDeltaTime() * 1000.0F);
-  auto fps_string = Clay_String{
-      .isStaticallyAllocated = false,
-      .length = static_cast<int32_t>(fps_text.length()),
-      .chars = fps_text.c_str(),
-  };
-  CLAY({.id = CLAY_ID("HelloWorld"),
-        .floating = {
-            .offset = {10.0F, 10.0F},
-            .attachTo = CLAY_ATTACH_TO_ROOT,
-        }}) {
-    CLAY_TEXT(fps_string, CLAY_TEXT_CONFIG({.textColor = {255, 255, 255, 255},
-                                            .fontId = 0,
-                                            .fontSize = 24}));
-  }
+  debug_overlay.Draw({
+      .average_frame_delta_time = frame_stats.GetAverageFrameDeltaTime(),
+      .total_time = frame_time_info.total_time,
+      .draw_calls = renderer->GetRecordedDrawCallCount(),
+  });
 
   auto clay_commands = ui_system->EndLayout();
   auto *frame_context = renderer->GetFrameContextForUpdate();
