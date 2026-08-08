@@ -42,7 +42,10 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
       .fragment_shader_bin_path = lumina::common::PathRegistry::Instance()
                                       .shaders.Resolve("shader.frag.spv")
                                       .string(),
-      .max_instances = 2,
+      // Sizes both the persistent descriptor pool and the material uniform
+      // buffer, so it has to cover the default instance plus every coloured
+      // instance the scene creates.
+      .max_instances = 16,
   };
   auto mat_template_handle = renderer->CreateMaterialTemplate(mat_desc);
 
@@ -183,47 +186,97 @@ auto InitDefaultMaterialUBO(void *mapped_data) -> void {
   mu->diffuse_color = {0.5F, 0.5F, 0.5F};
 }
 
-auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void {
+namespace {
+
+// Shared by every write path: the only thing that differs between instances is
+// which slice of the uniform buffer their descriptors point at.
+auto WriteLitDescriptorsFor(LuminaRenderer *renderer,
+                            const MaterialInstance &instance,
+                            VkSampler sampler, VkImageView image_view) -> void {
   namespace mat = shaders::simple_input_basic_mat::frag;
-
-  auto instance_opt = renderer->material_instance_manager.Get(
-      renderer->default_material_instance_handle);
-  LUMINA_CHECK(instance_opt.has_value(),
-               "Default material instance not found");
-  auto &instance = instance_opt.value();
-
-  mat::BindingData bindings{
-      .texSampler_sampler = renderer->texture_sampler,
-      .texSampler_imageView = renderer->texture_image_view,
-      .material_uniforms_buffer = renderer->default_material_ubo_buffer,
-  };
-
-  auto *device = renderer->vulkan_context.GetDevice();
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    mat::WriteDescriptors(device, instance->GetDescriptorSet(i), bindings);
-  }
-}
-
-auto UpdateDefaultMaterialTexture(LuminaRenderer *renderer, VkSampler sampler,
-                                   VkImageView image_view) -> void {
-  namespace mat = shaders::simple_input_basic_mat::frag;
-
-  auto instance_opt = renderer->material_instance_manager.Get(
-      renderer->default_material_instance_handle);
-  LUMINA_CHECK(instance_opt.has_value(),
-               "Default material instance not found");
-  auto &instance = instance_opt.value();
 
   mat::BindingData bindings{
       .texSampler_sampler = sampler,
       .texSampler_imageView = image_view,
-      .material_uniforms_buffer = renderer->default_material_ubo_buffer,
+      .material_uniforms_buffer = renderer->GetMaterialUniformBuffer(),
+      .material_uniforms_offset =
+          renderer->GetMaterialUniformOffset(instance.GetUniformSlot()),
   };
 
-  auto *device = renderer->vulkan_context.GetDevice();
+  // Public accessor rather than the member: this helper is in an anonymous
+  // namespace and so cannot be named in a friend declaration.
+  auto *device = renderer->GetVulkanContext().GetDevice();
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    mat::WriteDescriptors(device, instance->GetDescriptorSet(i), bindings);
+    mat::WriteDescriptors(device, instance.GetDescriptorSet(i), bindings);
   }
+}
+
+} // namespace
+
+auto SetLitMaterialDiffuseColor(LuminaRenderer *renderer,
+                                MaterialInstanceHandle instance_handle,
+                                const math::Vec3 &diffuse_color) -> void {
+  using MU = shaders::simple_input_basic_mat::frag::MaterialUniforms;
+
+  auto instance_opt =
+      renderer->material_instance_manager.Get(instance_handle);
+  LUMINA_CHECK(instance_opt.has_value(), "Material instance not found");
+
+  auto *uniforms = static_cast<MU *>(
+      renderer->GetMaterialUniformData(instance_opt.value()->GetUniformSlot()));
+  uniforms->diffuse_color = diffuse_color;
+}
+
+auto WriteLitMaterialDescriptors(LuminaRenderer *renderer,
+                                 MaterialInstanceHandle instance_handle)
+    -> void {
+  auto instance_opt =
+      renderer->material_instance_manager.Get(instance_handle);
+  LUMINA_CHECK(instance_opt.has_value(), "Material instance not found");
+
+  WriteLitDescriptorsFor(renderer, *instance_opt.value(),
+                         renderer->texture_sampler,
+                         renderer->texture_image_view);
+}
+
+auto UpdateLitMaterialTextures(LuminaRenderer *renderer, VkSampler sampler,
+                               VkImageView image_view) -> void {
+  const auto lit_template = renderer->default_material_template_handle;
+
+  renderer->material_instance_manager.ForEach(
+      [renderer, sampler, image_view, lit_template](
+          MaterialInstanceHandle /*handle*/,
+          MaterialInstance &instance) -> void {
+        // Instances of other templates have their own bindings and must not be
+        // written with this layout's BindingData.
+        if (instance.GetTemplateHandle() != lit_template) {
+          return;
+        }
+        WriteLitDescriptorsFor(renderer, instance, sampler, image_view);
+      });
+}
+
+auto CreateLitMaterialInstance(LuminaRenderer *renderer,
+                               const math::Vec3 &diffuse_color)
+    -> MaterialInstanceHandle {
+  auto instance_handle = renderer->CreateMaterialInstance(
+      renderer->default_material_template_handle);
+
+  // Creation and descriptor-set allocation both land in the resource manager's
+  // deferred queue, so each has to be flushed before the next step can read
+  // back what it wrote.
+  renderer->ProcessDeferredOperations();
+
+  const bool allocated =
+      renderer->AllocatePersistentDescriptorSets(instance_handle);
+  LUMINA_CHECK(allocated,
+               "Failed to allocate material instance descriptor sets — is "
+               "max_instances large enough for the template?");
+  renderer->ProcessDeferredOperations();
+
+  WriteLitMaterialDescriptors(renderer, instance_handle);
+  SetLitMaterialDiffuseColor(renderer, instance_handle, diffuse_color);
+  return instance_handle;
 }
 
 auto WriteTransientDescriptors(LuminaRenderer *renderer,

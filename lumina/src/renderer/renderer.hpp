@@ -97,6 +97,21 @@ public:
   auto CreateMaterialInstance(MaterialTemplateHandle tmpl_handle)
       -> MaterialInstanceHandle;
 
+  // Byte offset of a material instance's slice within material_ubo_buffer.
+  [[nodiscard]] auto GetMaterialUniformOffset(u32 slot) const -> VkDeviceSize {
+    return static_cast<VkDeviceSize>(slot) * material_ubo_slot_stride;
+  }
+
+  // Mapped pointer to a material instance's slice, for writing its uniforms.
+  [[nodiscard]] auto GetMaterialUniformData(u32 slot) const -> void * {
+    return static_cast<u8 *>(material_ubo_mapped) +
+           GetMaterialUniformOffset(slot);
+  }
+
+  [[nodiscard]] auto GetMaterialUniformBuffer() const -> VkBuffer {
+    return material_ubo_buffer;
+  }
+
   auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       -> GraphicsPipelineHandle;
 
@@ -259,16 +274,41 @@ private:
   VkDescriptorSetLayout global_descriptor_set_layout = VK_NULL_HANDLE;
   VkPipelineLayout global_pipeline_layout = VK_NULL_HANDLE;
 
-  VkBuffer default_material_ubo_buffer = VK_NULL_HANDLE;
-  VkDeviceMemory default_material_ubo_memory = VK_NULL_HANDLE;
-  void *default_material_ubo_mapped = nullptr;
+  // One host-visible buffer sub-divided into equally sized slots, one per
+  // material instance. A single allocation rather than a buffer per instance:
+  // MaterialUniforms is tens of bytes but Vulkan requires descriptor offsets to
+  // respect minUniformBufferOffsetAlignment, so per-instance buffers would be
+  // almost entirely padding.
+  VkBuffer material_ubo_buffer = VK_NULL_HANDLE;
+  VkDeviceMemory material_ubo_memory = VK_NULL_HANDLE;
+  void *material_ubo_mapped = nullptr;
+
+  // Every instance gets this stride regardless of template. It is derived from
+  // one specific material's uniform block, so a second material type with a
+  // larger block would overrun its slot — at that point this needs to become
+  // max(sizeof) across templates, or a pool per template.
+  VkDeviceSize material_ubo_slot_stride = 0;
+
+  // Summed from every template's max_instances, so the slot count and the
+  // descriptor pool are sized from the same declaration and cannot disagree.
+  u32 material_instance_budget = 0;
+  u32 next_material_ubo_slot = 0;
 
   friend auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
       -> std::expected<void, VkInitializationError>;
-  friend auto WriteDefaultMaterialDescriptors(LuminaRenderer *renderer) -> void;
-  friend auto UpdateDefaultMaterialTexture(LuminaRenderer *renderer,
-                                           VkSampler sampler,
-                                           VkImageView image_view) -> void;
+  friend auto WriteLitMaterialDescriptors(LuminaRenderer *renderer,
+                                          MaterialInstanceHandle instance_handle)
+      -> void;
+  friend auto UpdateLitMaterialTextures(LuminaRenderer *renderer,
+                                        VkSampler sampler,
+                                        VkImageView image_view) -> void;
+  friend auto CreateLitMaterialInstance(LuminaRenderer *renderer,
+                                        const math::Vec3 &diffuse_color)
+      -> MaterialInstanceHandle;
+  friend auto SetLitMaterialDiffuseColor(LuminaRenderer *renderer,
+                                         MaterialInstanceHandle instance_handle,
+                                         const math::Vec3 &diffuse_color)
+      -> void;
   friend auto WriteTransientDescriptors(LuminaRenderer *renderer,
                                         FrameContext &frame_context,
                                         VkDescriptorSet descriptor_set) -> void;

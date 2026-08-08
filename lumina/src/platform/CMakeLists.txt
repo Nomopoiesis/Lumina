@@ -18,10 +18,16 @@ elseif(APPLE)
   add_subdirectory(macos)
 endif()
 
+# This target has no outputs, so it re-runs on every build. A plain
+# copy_directory would then re-stamp every deployed asset with the build time,
+# which the mesh cache reads as "the source changed" and invalidates on. The
+# _if_different form compares contents and only touches files that actually
+# changed.
 add_custom_target(
   lumina_install_runtime_data ALL
   COMMAND
-    ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/lumina/data/runtime"
+    ${CMAKE_COMMAND} -E copy_directory_if_different
+    "${CMAKE_SOURCE_DIR}/lumina/data/runtime"
     "$<TARGET_FILE_DIR:${LUMINA_BIN_OUT_TARGET}>"
   COMMENT "Installing runtime data to build output...")
 

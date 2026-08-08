@@ -713,16 +713,14 @@ LuminaRenderer::~LuminaRenderer() noexcept {
     vkFreeMemory(vulkan_context.GetDevice(), texture_image_memory, nullptr);
   }
 
-  if (default_material_ubo_mapped != nullptr) {
-    vkUnmapMemory(vulkan_context.GetDevice(), default_material_ubo_memory);
+  if (material_ubo_mapped != nullptr) {
+    vkUnmapMemory(vulkan_context.GetDevice(), material_ubo_memory);
   }
-  if (default_material_ubo_buffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(vulkan_context.GetDevice(), default_material_ubo_buffer,
-                    nullptr);
+  if (material_ubo_buffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(vulkan_context.GetDevice(), material_ubo_buffer, nullptr);
   }
-  if (default_material_ubo_memory != VK_NULL_HANDLE) {
-    vkFreeMemory(vulkan_context.GetDevice(), default_material_ubo_memory,
-                 nullptr);
+  if (material_ubo_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), material_ubo_memory, nullptr);
   }
 
   if (persistent_descriptor_pool != VK_NULL_HANDLE) {
@@ -995,23 +993,44 @@ auto LuminaRenderer::Initialize() -> void {
                  desc_pool_result.error().message);
     LUMINA_TERMINATE();
   }
-  // Create the default material's uniform buffer.
-  {
-    VkDeviceSize mat_ubo_size = GetDefaultMaterialUBOSize();
-    CreateBuffer(vulkan_context, mat_ubo_size,
+  // Create the shared material uniform buffer: one slot per instance the
+  // material templates collectively budgeted for.
+  if (material_instance_budget > 0) {
+    VkPhysicalDeviceProperties device_properties;
+    vkGetPhysicalDeviceProperties(vulkan_context.GetPhysicalDevice(),
+                                  &device_properties);
+
+    // Descriptor buffer offsets must be multiples of this, so the per-instance
+    // stride is the uniform block rounded up rather than its bare size.
+    const VkDeviceSize alignment =
+        device_properties.limits.minUniformBufferOffsetAlignment;
+    const VkDeviceSize uniform_size = GetDefaultMaterialUBOSize();
+    material_ubo_slot_stride =
+        (alignment == 0)
+            ? uniform_size
+            : ((uniform_size + alignment - 1) / alignment) * alignment;
+
+    const VkDeviceSize buffer_size =
+        material_ubo_slot_stride * material_instance_budget;
+    CreateBuffer(vulkan_context, buffer_size,
                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE,
                  0, nullptr,
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 default_material_ubo_memory, default_material_ubo_buffer);
-    vkMapMemory(vulkan_context.GetDevice(), default_material_ubo_memory, 0,
-                mat_ubo_size, 0, &default_material_ubo_mapped);
-    InitDefaultMaterialUBO(default_material_ubo_mapped);
+                 material_ubo_memory, material_ubo_buffer);
+    vkMapMemory(vulkan_context.GetDevice(), material_ubo_memory, 0, buffer_size,
+                0, &material_ubo_mapped);
+
+    // Every slot gets defaults, not just the ones in use, so an instance can
+    // never be drawn with uninitialised uniforms.
+    for (u32 slot = 0; slot < material_instance_budget; ++slot) {
+      InitDefaultMaterialUBO(GetMaterialUniformData(slot));
+    }
   }
 
   AllocatePersistentDescriptorSets(default_material_instance_handle);
   ProcessDeferredOperations();
-  WriteDefaultMaterialDescriptors(this);
+  WriteLitMaterialDescriptors(this, default_material_instance_handle);
 
   {
     auto mat_opt =
@@ -1443,6 +1462,10 @@ auto LuminaRenderer::AccumulateDescriptorBudget(const ShaderLayout &vert_layout,
 
   max_persistent_descriptor_sets +=
       max_instances * persistent_sets.size() * MAX_FRAMES_IN_FLIGHT;
+
+  // Uniform slots come from the same declaration as the descriptor budget, so
+  // raising max_instances grows both and they cannot fall out of step.
+  material_instance_budget += static_cast<u32>(max_instances);
 }
 
 auto LuminaRenderer::CreateMaterialTemplate(
@@ -1473,6 +1496,11 @@ auto LuminaRenderer::CreateMaterialInstance(MaterialTemplateHandle tmpl_handle)
                  material_instance_result.error().message);
     LUMINA_TERMINATE();
   }
+  LUMINA_CHECK(next_material_ubo_slot < material_instance_budget,
+               "Material instance limit reached — raise max_instances on the "
+               "material template description");
+  material_instance_result.value().SetUniformSlot(next_material_ubo_slot++);
+
   auto material_instance_handle = material_instance_manager.Create(
       std::move(material_instance_result.value()));
   return material_instance_handle;
@@ -2102,7 +2130,7 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
                      nullptr);
         render_texture_manager->Update(
             handle, [](RenderTexture &rt) -> void { rt.ready = true; });
-        UpdateDefaultMaterialTexture(renderer, rt_sampler, rt_image_view);
+        UpdateLitMaterialTextures(renderer, rt_sampler, rt_image_view);
         if (is_font_atlas) {
           renderer->ui_renderer.SetFontAtlas(*ctx->vulkan_context,
                                              rt_image_view, rt_sampler);

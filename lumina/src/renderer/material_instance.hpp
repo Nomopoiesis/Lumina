@@ -46,9 +46,18 @@ public: // public methods
     return descriptor_sets;
   }
 
+  // Index of this instance's slice of the renderer's shared material uniform
+  // buffer. Instances differ by the *contents* of that slice, which is what
+  // lets two instances of one template render with different parameters.
+  [[nodiscard]] auto GetUniformSlot() const noexcept -> u32 {
+    return uniform_slot;
+  }
+
   auto SetTemplateHandle(MaterialTemplateHandle handle) noexcept -> void {
     material_template_handle = handle;
   }
+
+  auto SetUniformSlot(u32 slot) noexcept -> void { uniform_slot = slot; }
 
   auto ResetDescriptorSets() noexcept -> void {
     descriptor_sets.fill(VK_NULL_HANDLE);
@@ -57,6 +66,7 @@ public: // public methods
 private: // private members
   MaterialTemplateHandle material_template_handle;
   std::array<VkDescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptor_sets{};
+  u32 uniform_slot = 0;
 };
 
 } // namespace lumina::renderer

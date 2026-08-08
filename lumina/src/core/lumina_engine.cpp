@@ -1,5 +1,6 @@
 #include "lumina_engine.hpp"
 
+#include <array>
 #include <format>
 #include <span>
 #include <unordered_set>
@@ -23,6 +24,7 @@
 #include "math/basic.hpp"
 #include "math/trigonometry.hpp"
 #include "platform/platform_common/file_handle.hpp"
+#include "renderer/shaders/shader_gen/static_shader_api.hpp"
 #include "ui/ui_system.hpp"
 #include "uniform_interface/uniform_interface.hpp"
 
@@ -195,17 +197,46 @@ static auto BuildUIBatch(Clay_RenderCommandArray commands, UISystem &ui_system,
 static constexpr u32 DEBUG_SPAWN_MESH_COUNT = 50000;
 static constexpr f32 DEBUG_SPAWN_RADIUS = 200.0F;
 
-// Each entity gets a mesh picked at random from `mesh_handles`, so the scene
-// ends up with all available meshes mixed together — which is what makes draw
-// sorting and batching observable rather than trivially correct.
-static auto SpawnMeshEntities(World &world, u32 count,
-                              std::span<const StaticMeshHandle> mesh_handles,
-                              const math::Vec3 &origin, f32 radius) -> void {
+// Diffuse colours for the debug scene's material instances. Distinct enough to
+// tell apart on screen, so a mis-bound descriptor set shows up as an entity in
+// the wrong colour rather than something subtle.
+static constexpr std::array<math::Vec3, 6> DEBUG_MATERIAL_COLORS = {
+    math::Vec3{0.85F, 0.25F, 0.25F}, // red
+    math::Vec3{0.25F, 0.75F, 0.35F}, // green
+    math::Vec3{0.25F, 0.45F, 0.90F}, // blue
+    math::Vec3{0.90F, 0.75F, 0.20F}, // amber
+    math::Vec3{0.70F, 0.30F, 0.85F}, // violet
+    math::Vec3{0.20F, 0.80F, 0.85F}, // cyan
+};
+
+// One instance per palette entry, all sharing the lit template. They live for
+// the process lifetime: the renderer owns them and nothing frees a uniform slot
+// yet, so creating them per-frame or per-entity would exhaust the budget.
+static auto CreateDebugMaterialInstances(renderer::LuminaRenderer &renderer)
+    -> std::vector<renderer::MaterialInstanceHandle> {
+  std::vector<renderer::MaterialInstanceHandle> instances;
+  instances.reserve(DEBUG_MATERIAL_COLORS.size());
+  for (const auto &color : DEBUG_MATERIAL_COLORS) {
+    instances.push_back(renderer::CreateLitMaterialInstance(&renderer, color));
+  }
+  return instances;
+}
+
+// Each entity gets a mesh and a material instance picked at random, so the
+// scene ends up with all available meshes and materials mixed together — which
+// is what makes draw sorting and batching observable rather than trivially
+// correct.
+static auto SpawnMeshEntities(
+    World &world, u32 count, std::span<const StaticMeshHandle> mesh_handles,
+    std::span<const renderer::MaterialInstanceHandle> material_handles,
+    const math::Vec3 &origin, f32 radius) -> void {
   using lumina::common::random::FastRandom;
   constexpr f32 InvU32Max = 1.0F / 4294967295.0F;
 
   LUMINA_CHECK(!mesh_handles.empty(),
                "SpawnMeshEntities requires at least one mesh");
+  LUMINA_CHECK(!material_handles.empty(),
+               "SpawnMeshEntities requires at least one material instance");
 
   for (u32 i = 0; i < count; ++i) {
     // Uniform distribution within a sphere via spherical coordinates
@@ -230,11 +261,14 @@ static auto SpawnMeshEntities(World &world, u32 count,
     };
 
     const auto mesh_handle = mesh_handles[FastRandom() % mesh_handles.size()];
+    const auto material_handle =
+        material_handles[FastRandom() % material_handles.size()];
 
     auto entity_id = world.CreateEntity();
     world.AddComponent<Transform>(entity_id, position, rotation,
                                   math::Vec3{1.0F, 1.0F, 1.0F});
-    world.AddComponent<StaticMeshComponent>(entity_id, mesh_handle);
+    world.AddComponent<StaticMeshComponent>(entity_id, mesh_handle,
+                                            material_handle);
   }
 }
 
@@ -395,6 +429,12 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
 
   const auto static_mesh_handle = scene_meshes.front();
 
+  // After renderer initialization: instance creation writes descriptor sets and
+  // flushes deferred resource operations, which is only safe before frames
+  // start.
+  const auto scene_materials =
+      CreateDebugMaterialInstances(*instance.renderer);
+
   // Create the default world (scene)
   instance.current_world = std::make_unique<World>();
   auto &world = *instance.current_world;
@@ -420,10 +460,12 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -5.0F},
                                 math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
-  world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
+  world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle,
+                                          scene_materials.front());
 
   SpawnMeshEntities(world, DEBUG_SPAWN_MESH_COUNT, scene_meshes,
-                    math::Vec3{0.0F, 0.0F, 0.0F}, DEBUG_SPAWN_RADIUS);
+                    scene_materials, math::Vec3{0.0F, 0.0F, 0.0F},
+                    DEBUG_SPAWN_RADIUS);
 
   entity_id = world.CreateEntity();
   world.AddComponent<LightComponent>(

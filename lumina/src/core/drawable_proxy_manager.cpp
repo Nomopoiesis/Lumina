@@ -56,7 +56,14 @@ auto DrawableProxyManager::Sync(
 
         model.push_back(model_matrix);
         mesh_handle.push_back(static_mesh->render_mesh_handle);
-        material.push_back(renderer.GetDefaultMaterialInstanceHandle());
+
+        // Entities created without a material fall back to the renderer's
+        // default, so nothing that only sets a mesh has to change.
+        const auto material_instance = component.GetMaterialInstanceHandle();
+        material.push_back(
+            material_instance.index == INVALID_RESOURCE_HANDLE_INDEX
+                ? renderer.GetDefaultMaterialInstanceHandle()
+                : material_instance);
       });
 }
 
