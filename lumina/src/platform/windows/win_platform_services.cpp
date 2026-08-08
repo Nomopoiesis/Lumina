@@ -137,6 +137,36 @@ auto WinDeleteFile(const char *path) -> bool {
   return DeleteFileA(path) != FALSE;
 }
 
+auto WinGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
+  if (path == nullptr || write_time_ns == nullptr) {
+    return false;
+  }
+
+  // Attribute query rather than CreateFile: no handle to leak, and it succeeds
+  // on files another process currently holds open for writing.
+  WIN32_FILE_ATTRIBUTE_DATA attributes;
+  if (GetFileAttributesExA(path, GetFileExInfoStandard, &attributes) == FALSE) {
+    return false;
+  }
+
+  ULARGE_INTEGER ticks;
+  ticks.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
+  ticks.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
+
+  // FILETIME counts 100ns ticks from 1601-01-01. Rebase onto the Unix epoch;
+  // anything older than that saturates rather than wrapping the unsigned
+  // subtraction.
+  constexpr u64 TicksToUnixEpoch = 116444736000000000ULL;
+  constexpr u64 NanosecondsPerTick = 100ULL;
+  if (ticks.QuadPart < TicksToUnixEpoch) {
+    *write_time_ns = 0;
+    return true;
+  }
+
+  *write_time_ns = (ticks.QuadPart - TicksToUnixEpoch) * NanosecondsPerTick;
+  return true;
+}
+
 auto WinSetConsoleMode(HANDLE handle) -> void {
   if (handle == INVALID_HANDLE_VALUE) {
     return;
@@ -298,8 +328,9 @@ auto InitPlatformServices() -> void {
 
   lumina::platform::common::PlatformServices::Initialize(
       WinCreateFile, WinCreateDirectory, WinOpenFile, WinGetFileSize,
-      WinWriteFile, WinReadFile, WinCloseFile, WinDeleteFile, WinCreateConsole,
-      WinWriteConsole, WinWaitConsoleKeypress, WinSetThreadName, WinPinThread,
+      WinWriteFile, WinReadFile, WinCloseFile, WinDeleteFile,
+      WinGetFileWriteTime, WinCreateConsole, WinWriteConsole,
+      WinWaitConsoleKeypress, WinSetThreadName, WinPinThread,
       WinCreateFiber, WinConvertThreadToFiber, WinSwitchToFiber,
       WinDestroyFiber, WinSetFiberSelf, WinGetFiberSelf, WinSetCursorPosition,
       WinSetCursorTrapped);

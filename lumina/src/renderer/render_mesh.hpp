@@ -22,7 +22,7 @@ public:
   auto operator=(RenderMesh &&other) noexcept -> RenderMesh & = default;
   ~RenderMesh() noexcept = default;
 
-  size_t vertex_count;
+  size_t vertex_count = 0;
   std::vector<RenderVertexStream> vertex_streams;
 
   bool ready = false;

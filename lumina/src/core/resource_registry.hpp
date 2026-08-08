@@ -4,7 +4,7 @@
 
 #include "common/data_structures/lock_free_concurrent_queue.hpp"
 #include "common/lumina_assert.hpp"
-#include "resource_manager_handle.hpp"
+#include "resource_handle.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -14,16 +14,16 @@
 namespace lumina::core {
 
 template <typename T>
-class ResourceManager {
+class ResourceRegistry {
 public:
-  ResourceManager() noexcept = default;
-  ResourceManager(const ResourceManager &other) noexcept = delete;
-  ResourceManager(ResourceManager &&other) noexcept = delete;
-  auto operator=(const ResourceManager &other) noexcept
-      -> ResourceManager & = delete;
-  auto operator=(ResourceManager &&other) noexcept
-      -> ResourceManager & = delete;
-  ~ResourceManager() noexcept = default;
+  ResourceRegistry() noexcept = default;
+  ResourceRegistry(const ResourceRegistry &other) noexcept = delete;
+  ResourceRegistry(ResourceRegistry &&other) noexcept = delete;
+  auto operator=(const ResourceRegistry &other) noexcept
+      -> ResourceRegistry & = delete;
+  auto operator=(ResourceRegistry &&other) noexcept
+      -> ResourceRegistry & = delete;
+  ~ResourceRegistry() noexcept = default;
 
   auto Create() -> ResourceHandle<T>;
   auto Create(const T &&initial_value) -> ResourceHandle<T>;
@@ -98,13 +98,13 @@ private:
 };
 
 template <typename T>
-auto ResourceManager<T>::IsInFreeList(ResourceHandleIndexType index) const
+auto ResourceRegistry<T>::IsInFreeList(ResourceHandleIndexType index) const
     -> bool {
   return std::ranges::find(free_indices, index) != free_indices.end();
 }
 
 template <typename T>
-auto ResourceManager<T>::Create() -> ResourceHandle<T> {
+auto ResourceRegistry<T>::Create() -> ResourceHandle<T> {
   ResourceHandleIndexType index = 0;
   if (!free_indices.empty()) {
     index = free_indices.back();
@@ -112,21 +112,21 @@ auto ResourceManager<T>::Create() -> ResourceHandle<T> {
   } else {
     index = next_index.fetch_add(1);
   }
-  ASSERT(index < MAX_RESOURCES, "ResourceManager capacity exceeded");
+  ASSERT(index < MAX_RESOURCES, "ResourceRegistry capacity exceeded");
   ResourceHandle<T> handle{index, resources[index].generation};
   create_queue.Push(handle);
   return handle;
 }
 
 template <typename T>
-auto ResourceManager<T>::Create(const T &&initial_value) -> ResourceHandle<T> {
+auto ResourceRegistry<T>::Create(const T &&initial_value) -> ResourceHandle<T> {
   ResourceHandle<T> handle = Create();
   resources[handle.index].resource = std::move(initial_value);
   return handle;
 }
 
 template <typename T>
-auto ResourceManager<T>::Destroy(ResourceHandle<T> handle) -> void {
+auto ResourceRegistry<T>::Destroy(ResourceHandle<T> handle) -> void {
   ASSERT(handle.index < next_index.load(std::memory_order_relaxed) &&
              handle.index != INVALID_RESOURCE_HANDLE_INDEX,
          "Invalid resource handle");
@@ -134,7 +134,7 @@ auto ResourceManager<T>::Destroy(ResourceHandle<T> handle) -> void {
 }
 
 template <typename T>
-auto ResourceManager<T>::Destroy(
+auto ResourceRegistry<T>::Destroy(
     ResourceHandle<T> handle,
     std::function<void(ResourceHandle<T> handle, const T &resource)> on_destroy)
     -> void {
@@ -145,7 +145,7 @@ auto ResourceManager<T>::Destroy(
 }
 
 template <typename T>
-auto ResourceManager<T>::DestroyInternal(
+auto ResourceRegistry<T>::DestroyInternal(
     ResourceHandle<T> handle,
     std::function<void(ResourceHandle<T> handle, const T &resource)> on_destroy)
     -> void {
@@ -164,12 +164,12 @@ auto ResourceManager<T>::DestroyInternal(
 }
 
 template <typename T>
-auto ResourceManager<T>::DestroyAll() -> void {
+auto ResourceRegistry<T>::DestroyAll() -> void {
   DestroyAll(nullptr);
 }
 
 template <typename T>
-auto ResourceManager<T>::DestroyAll(
+auto ResourceRegistry<T>::DestroyAll(
     std::function<void(ResourceHandle<T> handle, const T &resource)> on_destroy)
     -> void {
   ForEach([this, on_destroy](ResourceHandle<T> handle, T &resource) -> void {
@@ -178,7 +178,7 @@ auto ResourceManager<T>::DestroyAll(
 }
 
 template <typename T>
-auto ResourceManager<T>::Get(ResourceHandle<T> handle, bool include_inactive)
+auto ResourceRegistry<T>::Get(ResourceHandle<T> handle, bool include_inactive)
     -> std::optional<const T *> {
   if (handle.index >= next_index.load(std::memory_order_relaxed) ||
       resources[handle.index].generation != handle.generation ||
@@ -189,20 +189,20 @@ auto ResourceManager<T>::Get(ResourceHandle<T> handle, bool include_inactive)
 }
 
 template <typename T>
-auto ResourceManager<T>::Update(ResourceHandle<T> handle, const T &resource)
+auto ResourceRegistry<T>::Update(ResourceHandle<T> handle, const T &resource)
     -> void {
   update_queue.Push({handle, resource});
 }
 
 template <typename T>
-auto ResourceManager<T>::Update(ResourceHandle<T> handle,
-                                std::function<void(T &)> patch_func) -> void {
+auto ResourceRegistry<T>::Update(ResourceHandle<T> handle,
+                                 std::function<void(T &)> patch_func) -> void {
   update_queue.Push({handle, patch_func});
 }
 
 template <typename T>
-auto ResourceManager<T>::UpdateInternal(ResourceHandle<T> handle,
-                                        UpdateData &update_data) -> void {
+auto ResourceRegistry<T>::UpdateInternal(ResourceHandle<T> handle,
+                                         UpdateData &update_data) -> void {
   // check if the entry has been destroyed
   if (handle.index >= next_index.load(std::memory_order_relaxed) ||
       resources[handle.index].generation != handle.generation) {
@@ -218,7 +218,7 @@ auto ResourceManager<T>::UpdateInternal(ResourceHandle<T> handle,
 }
 
 template <typename T>
-auto ResourceManager<T>::ForEach(
+auto ResourceRegistry<T>::ForEach(
     std::function<void(ResourceHandle<T> handle, T &resource)> func) -> void {
   for (ResourceHandleIndexType i = 0;
        i < next_index.load(std::memory_order_relaxed); ++i) {
@@ -230,7 +230,7 @@ auto ResourceManager<T>::ForEach(
 }
 
 template <typename T>
-auto ResourceManager<T>::ProcessDeferredOperations() -> void {
+auto ResourceRegistry<T>::ProcessDeferredOperations() -> void {
   ResourceHandle<T> create_handle{};
   while (create_queue.Pop(create_handle)) {
     if (resources[create_handle.index].generation == create_handle.generation) {

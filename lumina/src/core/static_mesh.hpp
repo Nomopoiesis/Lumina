@@ -4,7 +4,7 @@
 #include "data_structures/data_buffer.hpp"
 #include "renderer/primitive_topology.hpp"
 #include "renderer/render_mesh.hpp"
-#include "resource_manager.hpp"
+#include "resource_handle.hpp"
 #include "vertex_attribute.hpp"
 
 namespace lumina::core {
@@ -33,6 +33,5 @@ public:
 };
 
 using StaticMeshHandle = ResourceHandle<StaticMesh>;
-using StaticMeshManager = ResourceManager<StaticMesh>;
 
 } // namespace lumina::core

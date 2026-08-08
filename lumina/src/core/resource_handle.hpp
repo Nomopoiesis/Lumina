@@ -15,6 +15,9 @@ struct ResourceHandle {
   u32 generation = 0;
 
   auto operator==(const ResourceHandle &other) const -> bool = default;
+  [[nodiscard]] auto IsValid() const -> bool {
+    return index != INVALID_RESOURCE_HANDLE_INDEX;
+  }
 };
 
 } // namespace lumina::core

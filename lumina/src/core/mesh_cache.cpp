@@ -2,9 +2,11 @@
 
 #include "common/data_structures/data_buffer.hpp"
 #include "common/logger/logger.hpp"
+#include "common/scope_guard.hpp"
 #include "platform/platform_common/file_handle.hpp"
 
 #include <filesystem>
+#include <format>
 #include <string>
 
 namespace lumina::core {
@@ -32,10 +34,52 @@ namespace {
 constexpr u32 Magic = 0x48534D4C; // 'L','M','S','H' in little-endian
 constexpr u32 Version = 1;
 
+auto Fnv1a64(std::string_view text) -> u64 {
+  constexpr u64 OffsetBasis = 14695981039346656037ULL;
+  constexpr u64 Prime = 1099511628211ULL;
+
+  u64 hash = OffsetBasis;
+  for (const char character : text) {
+    hash ^= static_cast<u8>(character);
+    hash *= Prime;
+  }
+  return hash;
+}
+
+// Cache keys are asset paths, so they cannot be used as a path suffix: an
+// absolute key would make path::operator/ drop the cache root entirely, and
+// even a relative one would scatter .lmesh files across the source tree. Hash
+// the key into a single flat filename, prefixed with the stem so the cache
+// directory stays readable.
 auto CachePath(std::string_view cache_key,
                const common::PathResolver &cache_resolver)
     -> std::filesystem::path {
-  return cache_resolver.Resolve(std::string(cache_key) + ".lmesh");
+  const auto stem = std::filesystem::path(cache_key).stem().string();
+  return cache_resolver.Resolve(
+      std::format("{}_{:016x}.lmesh", stem, Fnv1a64(cache_key)));
+}
+
+// True when the source asset has been written since the cache entry was
+// produced. If either timestamp is unreadable — the source has been moved away,
+// say — the entry counts as fresh: a cached mesh we cannot compare against
+// still beats discarding the only copy we have.
+auto IsCacheStale(std::string_view source_path,
+                  const std::filesystem::path &cache_path) -> bool {
+  auto &platform_services = platform::common::PlatformServices::Instance();
+
+  u64 source_write_time = 0;
+  if (!platform_services.LuminaGetFileWriteTime(std::string(source_path).c_str(),
+                                                &source_write_time)) {
+    return false;
+  }
+
+  u64 cache_write_time = 0;
+  if (!platform_services.LuminaGetFileWriteTime(cache_path.string().c_str(),
+                                                &cache_write_time)) {
+    return false;
+  }
+
+  return source_write_time > cache_write_time;
 }
 
 } // namespace
@@ -54,6 +98,12 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
     return std::unexpected(MeshCacheError{"failed to create cache directory"});
   }
 
+  // LuminaCreateFile opens for append, so an entry left over from a previous
+  // run would be extended rather than replaced. Drop it first: rewriting an
+  // existing entry is the normal path whenever a source asset changes.
+  platform::common::PlatformServices::Instance().LuminaDeleteFile(
+      path.string().c_str());
+
   auto file_handle =
       platform::common::PlatformServices::Instance().LuminaCreateFile(
           path.string().c_str());
@@ -62,6 +112,9 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
     return std::unexpected(
         MeshCacheError{"failed to open cache file for writing"});
   }
+  ScopeGuard close_file([file_handle]() -> void {
+    platform::common::PlatformServices::Instance().LuminaCloseFile(file_handle);
+  });
 
   std::vector<u8> data_to_write;
   auto write = [&data_to_write](const void *data, size_t size) -> void {
@@ -112,7 +165,25 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
 
 auto HasCachedMesh(std::string_view cache_key,
                    const common::PathResolver &cache_resolver) -> bool {
-  return std::filesystem::exists(CachePath(cache_key, cache_resolver));
+  auto path = CachePath(cache_key, cache_resolver);
+  if (!std::filesystem::exists(path)) {
+    return false;
+  }
+
+  if (!IsCacheStale(cache_key, path)) {
+    return true;
+  }
+
+  // Report a miss so the caller re-parses the source, and drop the entry now
+  // rather than leaving a file that reads as a valid cache of an older mesh.
+  LOG_INFO("mesh_cache: {} changed since it was cached, invalidating {}",
+           cache_key, path.string());
+  if (!platform::common::PlatformServices::Instance().LuminaDeleteFile(
+          path.string().c_str())) {
+    LOG_WARNING("mesh_cache: failed to delete stale cache file: {}",
+                path.string());
+  }
+  return false;
 }
 
 auto DeserializeStaticMesh(std::string_view cache_key,
@@ -127,6 +198,9 @@ auto DeserializeStaticMesh(std::string_view cache_key,
     LOG_ERROR("mesh_cache: failed to open cache file: {}", path.string());
     return std::unexpected(MeshCacheError{"failed to open cache file"});
   }
+  ScopeGuard close_file([file_handle]() -> void {
+    platform::common::PlatformServices::Instance().LuminaCloseFile(file_handle);
+  });
 
   auto file_size =
       platform::common::PlatformServices::Instance().LuminaGetFileSize(

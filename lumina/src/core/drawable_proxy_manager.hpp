@@ -4,7 +4,7 @@
 #include "math/matrix.hpp"
 #include "renderer/material_instance_handle.hpp"
 #include "renderer/renderer.hpp"
-#include "static_mesh.hpp"
+#include "static_mesh_registry.hpp"
 #include "world.hpp"
 
 #include <vector>
@@ -76,7 +76,7 @@ public:
   auto operator=(DrawableProxyManager &&) noexcept
       -> DrawableProxyManager & = delete;
 
-  auto Sync(World &world, StaticMeshManager &static_mesh_manager,
+  auto Sync(World &world, StaticMeshResourceRegistry &static_mesh_registry,
             renderer::LuminaRenderer &renderer) -> void;
   [[nodiscard]] auto ProxyCount() const -> size_t { return center_x.size(); }
 

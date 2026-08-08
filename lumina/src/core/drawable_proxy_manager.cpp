@@ -4,9 +4,9 @@
 
 namespace lumina::core {
 
-auto DrawableProxyManager::Sync(World &world,
-                                StaticMeshManager &static_mesh_manager,
-                                renderer::LuminaRenderer &renderer) -> void {
+auto DrawableProxyManager::Sync(
+    World &world, StaticMeshResourceRegistry &static_mesh_registry,
+    renderer::LuminaRenderer &renderer) -> void {
   // TODO: first version of render proxy scene, we rebuild the entire scene
   // every frame, later we will optimize it to only rebuild the changed parts.
   center_x.clear();
@@ -20,11 +20,11 @@ auto DrawableProxyManager::Sync(World &world,
   material.clear();
 
   world.ForEachComponent<components::StaticMeshComponent>(
-      [this, &world, &static_mesh_manager,
+      [this, &world, &static_mesh_registry,
        &renderer](EntityID id,
                   const components::StaticMeshComponent &component) -> void {
         auto static_mesh_handle = component.GetStaticMeshHandle();
-        auto static_mesh_opt = static_mesh_manager.Get(static_mesh_handle);
+        auto static_mesh_opt = static_mesh_registry.Get(static_mesh_handle);
         if (!static_mesh_opt.has_value()) {
           return;
         }

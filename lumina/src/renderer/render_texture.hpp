@@ -1,6 +1,6 @@
 #pragma once
 
-#include "resource_manager_handle.hpp"
+#include "core/resource_handle.hpp"
 
 #include <vulkan/vulkan.h>
 

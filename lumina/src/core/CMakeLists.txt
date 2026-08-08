@@ -16,7 +16,8 @@ target_sources(
           frustum.cpp
           culling.cpp
           drawable_proxy_manager.cpp
-          debug_overlay_controller.cpp)
+          debug_overlay_controller.cpp
+          static_mesh_manager.cpp)
 
 # Uniform interface
 target_sources(lumina_core PRIVATE uniform_interface/uniform_interface.cpp)

@@ -4,7 +4,7 @@
 
 #include "common/data_structures/data_buffer.hpp"
 #include "renderer/render_texture.hpp"
-#include "resource_manager.hpp"
+#include "resource_registry.hpp"
 
 namespace lumina::core {
 
@@ -20,6 +20,6 @@ struct Texture {
 };
 
 using TextureHandle = ResourceHandle<Texture>;
-using TextureManager = ResourceManager<Texture>;
+using TextureManager = ResourceRegistry<Texture>;
 
 } // namespace lumina::core

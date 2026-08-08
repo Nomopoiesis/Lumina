@@ -41,7 +41,9 @@ public:
       bool (*write_file)(FileHandle handle, const void *data, std::size_t size),
       bool (*read_file)(FileHandle handle, void *data, std::size_t size),
       void (*close_file)(FileHandle handle),
-      bool (*delete_file)(const char *path), FileHandle (*create_console)(),
+      bool (*delete_file)(const char *path),
+      bool (*get_file_write_time)(const char *path, u64 *write_time_ns),
+      FileHandle (*create_console)(),
       void (*write_console)(FileHandle handle, const char *text,
                             std::size_t length),
       void (*wait_console_keypress)(),
@@ -65,6 +67,7 @@ public:
     instance.LuminaReadFile = read_file;
     instance.LuminaCloseFile = close_file;
     instance.LuminaDeleteFile = delete_file;
+    instance.LuminaGetFileWriteTime = get_file_write_time;
     instance.LuminaCreateConsole = create_console;
     instance.LuminaWriteConsole = write_console;
     instance.LuminaWaitConsoleKeypress = wait_console_keypress;
@@ -114,6 +117,15 @@ public:
   // Returns true on success, false on failure
   // Optional: used for log rotation
   bool (*LuminaDeleteFile)(const char *path) = nullptr;
+
+  // Writes the file's last-modification time, in nanoseconds since the Unix
+  // epoch, to write_time_ns. Platform clocks count from different epochs at
+  // different resolutions, so implementations must rebase onto that unit for
+  // timestamps to be comparable across platforms.
+  // Returns false if the file does not exist or cannot be queried, leaving
+  // write_time_ns untouched.
+  bool (*LuminaGetFileWriteTime)(const char *path,
+                                 u64 *write_time_ns) = nullptr;
 
   // Console operations
   // Creates/attaches to a console and returns a platform-specific handle

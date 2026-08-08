@@ -1,30 +1,28 @@
 #include "lumina_engine.hpp"
 
 #include <format>
+#include <span>
 #include <unordered_set>
+#include <vector>
 
-#include "bounding_box.hpp"
+#include "basic_geometry.hpp"
 #include "common/data_structures/data_buffer.hpp"
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
 #include "common/lumina_check.hpp"
-#include "common/path_registry.hpp"
-#include "data_structures/data_buffer.hpp"
-#include "platform/platform_common/file_handle.hpp"
-
-#include "basic_geometry.hpp"
 #include "components/camera.hpp"
 #include "components/light_component.hpp"
 #include "components/static_mesh_component.hpp"
 #include "components/transform.hpp"
-#include "data_parsers/obj_parser.hpp"
+#include "culling.hpp"
+#include "data_structures/data_buffer.hpp"
 #include "font.hpp"
 #include "frustum.hpp"
 #include "input/input_action.hpp"
 #include "job_system/job_manager.hpp"
 #include "math/basic.hpp"
 #include "math/trigonometry.hpp"
-#include "mesh_cache.hpp"
+#include "platform/platform_common/file_handle.hpp"
 #include "ui/ui_system.hpp"
 #include "uniform_interface/uniform_interface.hpp"
 
@@ -194,14 +192,20 @@ static auto BuildUIBatch(Clay_RenderCommandArray commands, UISystem &ui_system,
 // Number of test entities populated into the default world. Raise this to
 // stress the render path - entity/transform storage grows on demand, so the
 // only practical limit is frame time (there is no culling yet).
-static constexpr u32 DEBUG_SPAWN_MESH_COUNT = 100000;
+static constexpr u32 DEBUG_SPAWN_MESH_COUNT = 50000;
 static constexpr f32 DEBUG_SPAWN_RADIUS = 200.0F;
 
+// Each entity gets a mesh picked at random from `mesh_handles`, so the scene
+// ends up with all available meshes mixed together — which is what makes draw
+// sorting and batching observable rather than trivially correct.
 static auto SpawnMeshEntities(World &world, u32 count,
-                              StaticMeshHandle mesh_handle,
+                              std::span<const StaticMeshHandle> mesh_handles,
                               const math::Vec3 &origin, f32 radius) -> void {
   using lumina::common::random::FastRandom;
   constexpr f32 InvU32Max = 1.0F / 4294967295.0F;
+
+  LUMINA_CHECK(!mesh_handles.empty(),
+               "SpawnMeshEntities requires at least one mesh");
 
   for (u32 i = 0; i < count; ++i) {
     // Uniform distribution within a sphere via spherical coordinates
@@ -224,6 +228,8 @@ static auto SpawnMeshEntities(World &world, u32 count,
         static_cast<f32>(FastRandom()) * InvU32Max * 360.0F,
         static_cast<f32>(FastRandom()) * InvU32Max * 360.0F,
     };
+
+    const auto mesh_handle = mesh_handles[FastRandom() % mesh_handles.size()];
 
     auto entity_id = world.CreateEntity();
     world.AddComponent<Transform>(entity_id, position, rotation,
@@ -333,9 +339,12 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
         wireframe_box,
         instance.renderer->GetDebugWireframeMaterialTemplateHandle());
     wireframe_box.render_mesh_handle = render_mesh_handle;
-    instance.debug_aabb_mesh_handle =
-        instance.static_mesh_manager.Create(std::move(wireframe_box));
-    instance.static_mesh_manager.ProcessDeferredOperations();
+    auto create_mesh_result = instance.static_mesh_manager.CreateMesh(
+        "builtin:WireframeBox", std::move(wireframe_box));
+    ASSERT(create_mesh_result.has_value(),
+           create_mesh_result.error().Message());
+    instance.debug_aabb_mesh_handle = create_mesh_result.value();
+    instance.static_mesh_manager.GetRegistry().ProcessDeferredOperations();
   }
 
   instance.camera_movement_controller =
@@ -349,82 +358,42 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   instance.input_dispatcher.RegisterHandler(
       instance.debug_overlay_controller.get(), 5);
 
-  constexpr std::string_view ModelCacheKey = "suzanne";
-  const auto &model_cache =
-      lumina::common::PathRegistry::Instance().model_cache;
+  // Meshes the debug scene draws from. Source paths come from the models
+  // resolver rather than being spelled out: the resolved path doubles as the
+  // mesh cache key, so a hardcoded one would break on any other checkout.
+  const auto &models = lumina::common::PathRegistry::Instance().models;
 
-  StaticMesh static_mesh;
-  bool loaded_from_cache = false;
-  if (HasCachedMesh(ModelCacheKey, model_cache)) {
-    LOG_INFO("Loading mesh from cache: suzanne");
-    auto result = DeserializeStaticMesh(ModelCacheKey, model_cache);
-    if (result.has_value()) {
-      static_mesh = std::move(*result);
-      loaded_from_cache = true;
-    } else {
-      LOG_WARNING("Mesh cache unusable ({}), re-parsing OBJ",
-                  result.error().message);
-    }
-  }
-  if (!loaded_from_cache) {
-    LOG_INFO("Parsing OBJ: suzanne");
-    const auto model_path =
-        lumina::common::PathRegistry::Instance().models.Resolve("suzanne.obj");
-    auto file_handle =
-        platform::common::PlatformServices::Instance().LuminaOpenFile(
-            model_path.string().c_str());
-    if (file_handle == InvalidFileHandle) {
-      LOG_CRITICAL("Failed to open model file: {}", model_path.string());
+  auto load_obj_mesh = [&models,
+                        &instance](const char *asset_name) -> StaticMeshHandle {
+    const auto source_path = models.Resolve(asset_name).string();
+    auto result = instance.static_mesh_manager.LoadMesh(source_path);
+    if (!result.has_value()) {
+      LOG_CRITICAL("Failed to load model {}: {}", asset_name,
+                   result.error().Message());
       LUMINA_TERMINATE();
     }
-    std::size_t file_size =
-        platform::common::PlatformServices::Instance().LuminaGetFileSize(
-            file_handle);
-    common::data_structures::DataBuffer data_buffer(file_size);
-    const bool read_success =
-        platform::common::PlatformServices::Instance().LuminaReadFile(
-            file_handle, data_buffer.Data(), file_size);
-    platform::common::PlatformServices::Instance().LuminaCloseFile(file_handle);
-    if (!read_success || file_size == 0) {
-      LOG_CRITICAL("Failed to read model file: {}", model_path.string());
+    return result.value();
+  };
+
+  std::vector<StaticMeshHandle> scene_meshes;
+  scene_meshes.push_back(load_obj_mesh("suzanne.obj"));
+  scene_meshes.push_back(load_obj_mesh("sphere.obj"));
+
+  {
+    // Procedural rather than loaded, but it goes through the same registry so
+    // it is referable by name and picks up the deferred GPU upload like any
+    // other mesh.
+    auto cube_result = instance.static_mesh_manager.CreateMesh(
+        "builtin:Cube", BasicGeometry::Cube());
+    if (!cube_result.has_value()) {
+      LOG_CRITICAL("Failed to create builtin cube mesh: {}",
+                   cube_result.error().Message());
       LUMINA_TERMINATE();
     }
-    auto obj_data = data_parsers::ParseOBJ(data_buffer.View());
-    if (obj_data.vertex_count == 0) {
-      LOG_CRITICAL("Model file contained no geometry: {}", model_path.string());
-      LUMINA_TERMINATE();
-    }
-    static_mesh.vertex_count = obj_data.vertex_count;
-    static_mesh.vertex_attributes.emplace_back(
-        VertexAttribute{.type = VertexAttributeType::Position,
-                        .element_type = ElementType::Vec3},
-        DataBuffer(reinterpret_cast<u8 *>(obj_data.positions.data()),
-                   obj_data.positions.size() * sizeof(math::Vec3)));
-    static_mesh.vertex_attributes.emplace_back(
-        VertexAttribute{.type = VertexAttributeType::Normal,
-                        .element_type = ElementType::Vec3},
-        DataBuffer(reinterpret_cast<u8 *>(obj_data.normals.data()),
-                   obj_data.normals.size() * sizeof(math::Vec3)));
-    static_mesh.vertex_attributes.emplace_back(
-        VertexAttribute{.type = VertexAttributeType::TexCoord,
-                        .element_type = ElementType::Vec2},
-        DataBuffer(reinterpret_cast<u8 *>(obj_data.tex_coords.data()),
-                   obj_data.tex_coords.size() * sizeof(math::Vec2)));
-    static_mesh.indices = obj_data.indices;
-
-    static_mesh.bounding_box = ComputeAABoundingBox(obj_data.positions.data(),
-                                                    obj_data.positions.size());
-
-    auto cache_result =
-        SerializeStaticMesh(static_mesh, ModelCacheKey, model_cache);
-    if (!cache_result.has_value()) {
-      LOG_WARNING("Failed to write mesh cache: {}",
-                  cache_result.error().message);
-    }
+    scene_meshes.push_back(cube_result.value());
   }
 
-  auto static_mesh_handle =
-      instance.static_mesh_manager.Create(std::move(static_mesh));
+  const auto static_mesh_handle = scene_meshes.front();
 
   // Create the default world (scene)
   instance.current_world = std::make_unique<World>();
@@ -453,7 +422,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                                 math::Vec3{1.0F, 1.0F, 1.0F});
   world.AddComponent<StaticMeshComponent>(entity_id, static_mesh_handle);
 
-  SpawnMeshEntities(world, DEBUG_SPAWN_MESH_COUNT, static_mesh_handle,
+  SpawnMeshEntities(world, DEBUG_SPAWN_MESH_COUNT, scene_meshes,
                     math::Vec3{0.0F, 0.0F, 0.0F}, DEBUG_SPAWN_RADIUS);
 
   entity_id = world.CreateEntity();
@@ -487,7 +456,7 @@ auto LuminaEngine::BeginFrame(Timer &timer) -> void {
 }
 
 auto LuminaEngine::ProcessDeferredOperations() -> void {
-  static_mesh_manager.ProcessDeferredOperations();
+  static_mesh_manager.GetRegistry().ProcessDeferredOperations();
   texture_manager.ProcessDeferredOperations();
 }
 
@@ -517,7 +486,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
           return;
         }
         dispatched_mesh_uploads.insert(static_mesh_handle.index);
-        static_mesh_manager.Update(
+        static_mesh_manager.GetRegistry().Update(
             static_mesh_handle,
             [](StaticMesh &mesh) -> void { mesh.render_active = true; });
         auto *job = job_system::GetJobManager().AcquireJob();
@@ -528,7 +497,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
           auto &m = m_opt.value();
           auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
               *m, engine->GetRenderer().GetDefaultMaterialTemplateHandle());
-          engine->static_mesh_manager.Update(
+          engine->static_mesh_manager.GetRegistry().Update(
               static_mesh_handle,
               [render_mesh_handle](StaticMesh &mesh) -> void {
                 mesh.render_mesh_handle = render_mesh_handle;
@@ -579,7 +548,8 @@ auto LuminaEngine::ExecuteFrame() -> void {
     auto *frame_context = engine->renderer->GetFrameContextForUpdate();
     frame_context->draw_list.clear();
     engine->drawable_proxy_manager.Sync(
-        *engine->current_world, engine->static_mesh_manager, *engine->renderer);
+        *engine->current_world, engine->static_mesh_manager.GetRegistry(),
+        *engine->renderer);
     auto camera_id = engine->current_world->GetActiveCamera();
     auto transform = engine->current_world->GetTransform(camera_id);
     auto camera = engine->current_world->GetComponent<Camera>(camera_id);

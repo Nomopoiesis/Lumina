@@ -127,6 +127,24 @@ auto LinuxDeleteFile(const char *path) -> bool {
   return unlink(path) == 0;
 }
 
+auto LinuxGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
+  if (path == nullptr || write_time_ns == nullptr) {
+    return false;
+  }
+
+  struct stat st{};
+  if (stat(path, &st) == -1) {
+    return false;
+  }
+
+  // st_mtim is already Unix-epoch based, so it only needs flattening to ns.
+  constexpr u64 NanosecondsPerSecond = 1000000000ULL;
+  *write_time_ns =
+      (static_cast<u64>(st.st_mtim.tv_sec) * NanosecondsPerSecond) +
+      static_cast<u64>(st.st_mtim.tv_nsec);
+  return true;
+}
+
 // Statics for the keypress-wait handshake (log FIFO fd + ack FIFO path).
 // LinuxWaitConsoleKeypress closes the log FIFO (so cat sees EOF in the
 // terminal) then blocks on the ack FIFO until the terminal signals that the
@@ -449,7 +467,8 @@ auto InitPlatformServices() -> void {
   lumina::platform::common::PlatformServices::Initialize(
       LinuxCreateFile, LinuxCreateDirectory, LinuxOpenFile, LinuxGetFileSize,
       LinuxWriteFile, LinuxReadFile, LinuxCloseFile, LinuxDeleteFile,
-      LinuxCreateConsole, LinuxWriteConsole, LinuxWaitConsoleKeypress,
+      LinuxGetFileWriteTime, LinuxCreateConsole, LinuxWriteConsole,
+      LinuxWaitConsoleKeypress,
       LinuxSetThreadName, LinuxPinThread, LinuxCreateFiber,
       LinuxConvertThreadToFiber, LinuxSwitchToFiber, LinuxDestroyFiber,
       LinuxSetFiberSelf, LinuxGetFiberSelf, LinuxSetCursorPosition,

@@ -26,11 +26,11 @@
 
 namespace lumina::renderer {
 
-using GraphicsPipelineManager = core::ResourceManager<GraphicsPipeline>;
-using RenderMeshManager = core::ResourceManager<RenderMesh>;
-using RenderTextureManager = core::ResourceManager<RenderTexture>;
-using MaterialTemplateManager = core::ResourceManager<MaterialTemplate>;
-using MaterialInstanceManager = core::ResourceManager<MaterialInstance>;
+using GraphicsPipelineManager = core::ResourceRegistry<GraphicsPipeline>;
+using RenderMeshManager = core::ResourceRegistry<RenderMesh>;
+using RenderTextureManager = core::ResourceRegistry<RenderTexture>;
+using MaterialTemplateManager = core::ResourceRegistry<MaterialTemplate>;
+using MaterialInstanceManager = core::ResourceRegistry<MaterialInstance>;
 
 using CommandSubmissionQueue =
     common::data_structures::LockFreeConcurrentQueue<CommandContext *>;
@@ -143,7 +143,8 @@ public:
     default_material_template_handle = handle;
   }
 
-  auto SetDebugWireframeMaterialTemplate(MaterialTemplateHandle handle) -> void {
+  auto SetDebugWireframeMaterialTemplate(MaterialTemplateHandle handle)
+      -> void {
     debug_wireframe_material_template_handle = handle;
   }
 
