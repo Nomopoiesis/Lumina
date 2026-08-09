@@ -6,7 +6,6 @@
 #include <optional>
 #include <vector>
 
-
 namespace lumina::core {
 
 class EntityManager {
@@ -18,7 +17,7 @@ public:
   auto operator=(EntityManager &&) noexcept -> EntityManager & = delete;
   ~EntityManager() = default;
 
-  auto CreateEntity() -> EntityID;
+  auto CreateEntity(Mobility mobility) -> EntityID;
   auto DestroyEntity(EntityID id) -> void;
   auto GetEntity(EntityID id) -> std::optional<Entity>;
 

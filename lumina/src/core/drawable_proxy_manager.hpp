@@ -121,11 +121,29 @@ public:
   //
   // Bounds are world-space: the frustum planes they are tested against are, so
   // the model transform is already baked in here.
+  size_t static_proxy_count = 0;
   std::vector<f32> center_x, center_y, center_z;
   std::vector<f32> extent_x, extent_y, extent_z;
-
   std::vector<math::Mat4> model;
   std::vector<u32> draw_item_indices;
+
+  std::vector<EntityID> pending_static_entities;
+  std::vector<EntityID> dynamic_entities;
+
+private:
+  auto
+  ProcessPendingStaticEntities(World &world,
+                               StaticMeshResourceRegistry &static_mesh_registry,
+                               renderer::LuminaRenderer &renderer) -> void;
+
+  auto ProcessRegisteredDynamicEntities(
+      World &world, StaticMeshResourceRegistry &static_mesh_registry,
+      renderer::LuminaRenderer &renderer) -> void;
+
+  auto ProcessProxy(World &world,
+                    StaticMeshResourceRegistry &static_mesh_registry,
+                    renderer::LuminaRenderer &renderer, EntityID entity_id)
+      -> bool;
 };
 
 } // namespace lumina::core

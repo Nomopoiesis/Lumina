@@ -263,7 +263,7 @@ static auto SpawnMeshEntities(
     const auto material_handle =
         material_handles[FastRandom() % material_handles.size()];
 
-    auto entity_id = world.CreateEntity();
+    auto entity_id = world.CreateEntity(Mobility::Static);
     world.AddComponent<Transform>(entity_id, position, rotation,
                                   math::Vec3{1.0F, 1.0F, 1.0F});
     world.AddComponent<StaticMeshComponent>(entity_id, mesh_handle,
@@ -347,6 +347,8 @@ static auto BuildDrawList(const DrawableProxyManager &proxies,
                           DrawListScratch &scratch,
                           std::vector<renderer::DrawMeshBatch> &batches)
     -> void {
+  LUMINA_PROFILE_SCOPE("BuildDrawList");
+
   const auto item_count = draw_item_registry.GetCount();
 
   scratch.counts.assign(item_count, 0);
@@ -386,11 +388,12 @@ static auto BuildDrawList(const DrawableProxyManager &proxies,
   });
 }
 
-static auto BuildDebugAABBDrawList(
-    const DrawableProxyManager &proxies,
-    const BatchedVisibilityIndex &visibility,
-    renderer::RenderMeshHandle debug_mesh,
-    std::vector<renderer::DrawDebugAABBCommand> &debug_draws) -> void {
+static auto
+BuildDebugAABBDrawList(const DrawableProxyManager &proxies,
+                       const BatchedVisibilityIndex &visibility,
+                       renderer::RenderMeshHandle debug_mesh,
+                       std::vector<renderer::DrawDebugAABBCommand> &debug_draws)
+    -> void {
   debug_draws.clear();
   visibility.ForEachVisible([&](size_t index) -> void {
     const auto bounds = proxies.GetProxyAABB(index);
@@ -525,7 +528,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   world.SetActiveCamera(entity_id);
   instance.camera_movement_controller->SetControlledEntity(entity_id);
 
-  entity_id = world.CreateEntity();
+  entity_id = world.CreateEntity(Mobility::Static);
   world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, -5.0F},
                                 math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
@@ -536,7 +539,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                     scene_materials, math::Vec3{0.0F, 0.0F, 0.0F},
                     DEBUG_SPAWN_RADIUS);
 
-  entity_id = world.CreateEntity();
+  entity_id = world.CreateEntity(Mobility::Static);
   world.AddComponent<LightComponent>(
       entity_id, LightType::Point, math::Vec3{1.0F, 1.0F, 1.0F}, 2.0F, 200.0F);
   world.AddComponent<Transform>(entity_id, math::Vec3{0.0F, 0.0F, 0.0F},
@@ -557,7 +560,16 @@ auto LuminaEngine::Shutdown() -> void {
 }
 
 auto LuminaEngine::BeginFrame(Timer &timer) -> void {
-  renderer->AcquireFrameContextForUpdate();
+  {
+    // Detached because it closes before the Update root opens, so it has to
+    // stay out of the accounted/unaccounted arithmetic. This is not work: the
+    // update thread blocks on the frame-context semaphore until the render
+    // thread releases one, so the number is how much of the frame period the
+    // update thread spends waiting for the renderer. A large value here with a
+    // small Update means the frame is bound by the render side, not by us.
+    LUMINA_PROFILE_SCOPE_DETACHED("WaitRender");
+    renderer->AcquireFrameContextForUpdate();
+  }
   ui_system->BeginLayout(window_dimensions.width, window_dimensions.height);
   auto delta_time = timer.Tick();
   frame_time_info.delta_time = delta_time;
@@ -572,77 +584,111 @@ auto LuminaEngine::ProcessDeferredOperations() -> void {
   texture_manager.ProcessDeferredOperations();
 }
 
+// Weight given to the newest frame when folding zone times into the moving
+// average. At ~100 FPS this settles in roughly a tenth of a second, which is
+// also the overlay's refresh interval — fast enough to react to a change,
+// slow enough that the digits stay readable.
+static constexpr f64 ZONE_EMA_ALPHA = 0.1;
+
 auto LuminaEngine::EndFrame() -> void {
+  // After ExecuteFrame has returned, so the frame root zone has closed and its
+  // accumulator holds a complete span. Render-thread zones are whatever landed
+  // in the table by now, which is why they are registered as Detached and kept
+  // out of the accounted total.
+  profiling::EndFrame(frame_profile);
+  for (u32 i = 0; i < frame_profile.zone_count; ++i) {
+    const auto &sample = frame_profile.samples[i];
+    if (sample.name == nullptr) {
+      continue;
+    }
+    zone_seconds_ema[i] +=
+        (sample.seconds - zone_seconds_ema[i]) * ZONE_EMA_ALPHA;
+  }
+
   ProcessDeferredOperations();
+  current_world->ClearAdditions();
   renderer->ReleaseFrameContextForUpdate();
 }
 
 auto LuminaEngine::ExecuteFrame() -> void {
+  // The frame root. Everything the update thread does is inside this span, so
+  // it is the denominator the phase zones and the unaccounted row are read
+  // against. Exactly one call site may use LUMINA_PROFILE_FRAME.
+  LUMINA_PROFILE_FRAME("Update");
+
   // Dispatch upload jobs for any meshes not yet uploaded to the GPU.
   // Track dispatched handles locally to avoid multiple jobs for the same mesh
   // when several entities share a handle (render_active update is deferred).
-  std::unordered_set<ResourceHandleIndexType> dispatched_mesh_uploads;
-  current_world->ForEachComponent<StaticMeshComponent>(
-      [this, &dispatched_mesh_uploads](EntityID /*id*/,
-                                       const StaticMeshComponent &component) {
-        auto static_mesh_handle = component.GetStaticMeshHandle();
-        if (dispatched_mesh_uploads.contains(static_mesh_handle.index)) {
-          return;
-        }
-        auto mesh_opt = static_mesh_manager.Get(static_mesh_handle);
-        if (!mesh_opt.has_value()) {
-          return;
-        }
-        auto &mesh = mesh_opt.value();
-        if (mesh->render_active) {
-          return;
-        }
-        dispatched_mesh_uploads.insert(static_mesh_handle.index);
-        static_mesh_manager.GetRegistry().Update(
-            static_mesh_handle,
-            [](StaticMesh &mesh) -> void { mesh.render_active = true; });
-        auto *job = job_system::GetJobManager().AcquireJob();
-        job->execute = [static_mesh_handle](void *data) -> void {
-          auto *engine = static_cast<LuminaEngine *>(data);
-          auto m_opt = engine->static_mesh_manager.Get(static_mesh_handle);
-          LUMINA_CHECK(m_opt.has_value(), "Static mesh not found");
-          auto &m = m_opt.value();
-          auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
-              *m, engine->GetRenderer().GetDefaultMaterialTemplateHandle());
-          engine->static_mesh_manager.GetRegistry().Update(
+  {
+    LUMINA_PROFILE_SCOPE("DispatchMeshUploads");
+    std::unordered_set<ResourceHandleIndexType> dispatched_mesh_uploads;
+    current_world->ForEachComponent<StaticMeshComponent>(
+        [this, &dispatched_mesh_uploads](EntityID /*id*/,
+                                         const StaticMeshComponent &component) {
+          auto static_mesh_handle = component.GetStaticMeshHandle();
+          if (dispatched_mesh_uploads.contains(static_mesh_handle.index)) {
+            return;
+          }
+          auto mesh_opt = static_mesh_manager.Get(static_mesh_handle);
+          if (!mesh_opt.has_value()) {
+            return;
+          }
+          auto &mesh = mesh_opt.value();
+          if (mesh->render_active) {
+            return;
+          }
+          dispatched_mesh_uploads.insert(static_mesh_handle.index);
+          static_mesh_manager.GetRegistry().Update(
               static_mesh_handle,
-              [render_mesh_handle](StaticMesh &mesh) -> void {
-                mesh.render_mesh_handle = render_mesh_handle;
-              });
-        };
-        job->data = this;
-        job_system::GetJobManager().SubmitJob(job);
-      });
+              [](StaticMesh &mesh) -> void { mesh.render_active = true; });
+          auto *job = job_system::GetJobManager().AcquireJob();
+          job->execute = [static_mesh_handle](void *data) -> void {
+            auto *engine = static_cast<LuminaEngine *>(data);
+            auto m_opt = engine->static_mesh_manager.Get(static_mesh_handle);
+            LUMINA_CHECK(m_opt.has_value(), "Static mesh not found");
+            auto &m = m_opt.value();
+            auto render_mesh_handle = engine->GetRenderer().CreateRenderMesh(
+                *m, engine->GetRenderer().GetDefaultMaterialTemplateHandle());
+            engine->static_mesh_manager.GetRegistry().Update(
+                static_mesh_handle,
+                [render_mesh_handle](StaticMesh &mesh) -> void {
+                  mesh.render_mesh_handle = render_mesh_handle;
+                });
+          };
+          job->data = this;
+          job_system::GetJobManager().SubmitJob(job);
+        });
+  }
 
-  std::unordered_set<ResourceHandleIndexType> dispatched_texture_uploads;
-  texture_manager.ForEach([this, &dispatched_texture_uploads](
-                              TextureHandle handle, Texture &texture) -> void {
-    if (dispatched_texture_uploads.contains(handle.index)) {
-      return;
-    }
-    if (texture.render_active) {
-      return;
-    }
-    dispatched_texture_uploads.insert(handle.index);
-    texture_manager.Update(handle,
-                           [](Texture &t) -> void { t.render_active = true; });
-    auto *job = job_system::GetJobManager().AcquireJob();
-    job->execute = [handle](void *data) -> void {
-      auto *engine = static_cast<LuminaEngine *>(data);
-      auto t_opt = engine->texture_manager.Get(handle);
-      LUMINA_CHECK(t_opt.has_value(), "Texture not found during GPU upload");
-      auto rth = engine->renderer->CreateRenderTexture(*t_opt.value());
-      engine->texture_manager.Update(
-          handle, [rth](Texture &t) -> void { t.render_texture_handle = rth; });
-    };
-    job->data = this;
-    job_system::GetJobManager().SubmitJob(job);
-  });
+  {
+    LUMINA_PROFILE_SCOPE("DispatchTextureUploads");
+    std::unordered_set<ResourceHandleIndexType> dispatched_texture_uploads;
+    texture_manager.ForEach([this, &dispatched_texture_uploads](
+                                TextureHandle handle,
+                                Texture &texture) -> void {
+      if (dispatched_texture_uploads.contains(handle.index)) {
+        return;
+      }
+      if (texture.render_active) {
+        return;
+      }
+      dispatched_texture_uploads.insert(handle.index);
+      texture_manager.Update(
+          handle, [](Texture &t) -> void { t.render_active = true; });
+      auto *job = job_system::GetJobManager().AcquireJob();
+      job->execute = [handle](void *data) -> void {
+        auto *engine = static_cast<LuminaEngine *>(data);
+        auto t_opt = engine->texture_manager.Get(handle);
+        LUMINA_CHECK(t_opt.has_value(), "Texture not found during GPU upload");
+        auto rth = engine->renderer->CreateRenderTexture(*t_opt.value());
+        engine->texture_manager.Update(handle, [rth](Texture &t) -> void {
+          t.render_texture_handle = rth;
+        });
+      };
+      job->data = this;
+      job_system::GetJobManager().SubmitJob(job);
+    });
+  }
 
   auto *frame_sync_counter = job_system::GetJobManager().AllocateCounter(2);
   auto *job = job_system::GetJobManager().AcquireJob();
@@ -707,10 +753,17 @@ auto LuminaEngine::ExecuteFrame() -> void {
   job_system::GetJobManager().WaitForCounter(frame_sync_counter);
   job_system::GetJobManager().ReleaseCounter(frame_sync_counter);
 
+  // The profile is last frame's — EndFrame snapshots after ExecuteFrame has
+  // returned — so the zone rows trail by one frame, the same as the draw call
+  // count above them.
   debug_overlay.Draw({
       .average_frame_delta_time = frame_stats.GetAverageFrameDeltaTime(),
       .total_time = frame_time_info.total_time,
       .draw_calls = renderer->GetRecordedDrawCallCount(),
+      .zone_samples =
+          std::span{frame_profile.samples.data(), frame_profile.zone_count},
+      .zone_seconds_ema =
+          std::span{zone_seconds_ema.data(), frame_profile.zone_count},
   });
 
   auto clay_commands = ui_system->EndLayout();

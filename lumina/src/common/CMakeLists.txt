@@ -29,8 +29,21 @@ target_sources(
 
 add_library(lumina_path_registry STATIC)
 target_sources(lumina_path_registry PRIVATE path_registry.cpp)
-target_include_directories(lumina_path_registry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(lumina_path_registry
+                           PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(lumina_path_registry PUBLIC lumina_common)
+
+# CPU zone profiler. A static library rather than part of the header-only
+# lumina_common, because the accumulator table must have exactly one definition
+# across every consumer — two copies would silently split the accounting.
+add_library(lumina_profiling STATIC)
+target_sources(lumina_profiling PRIVATE profiling/profiler.cpp)
+target_include_directories(
+  lumina_profiling PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                          $<TARGET_PROPERTY:lumina_src_dir,LUMINA_SRC_DIR>)
+target_link_libraries(lumina_profiling PUBLIC lumina_common)
+target_link_libraries(lumina_profiling PRIVATE lumina_logger
+                                               lumina_common_terminate)
 
 add_library(lumina_common_terminate STATIC)
 target_sources(lumina_common_terminate PRIVATE lumina_terminate.cpp)

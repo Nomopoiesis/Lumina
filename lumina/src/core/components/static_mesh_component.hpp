@@ -1,5 +1,6 @@
 #pragma once
 
+#include "component_storage.hpp"
 #include "renderer/material_instance_handle.hpp"
 #include "static_mesh.hpp"
 
@@ -10,9 +11,9 @@ public:
   StaticMeshComponent() noexcept = default;
   StaticMeshComponent(const StaticMeshHandle &static_mesh_handle_) noexcept
       : static_mesh_handle(static_mesh_handle_) {}
-  StaticMeshComponent(
-      const StaticMeshHandle &static_mesh_handle_,
-      const renderer::MaterialInstanceHandle &material_instance_handle_) noexcept
+  StaticMeshComponent(const StaticMeshHandle &static_mesh_handle_,
+                      const renderer::MaterialInstanceHandle
+                          &material_instance_handle_) noexcept
       : static_mesh_handle(static_mesh_handle_),
         material_instance_handle(material_instance_handle_) {}
   StaticMeshComponent(const StaticMeshComponent &other) noexcept = default;
@@ -38,5 +39,8 @@ private:
   StaticMeshHandle static_mesh_handle;
   renderer::MaterialInstanceHandle material_instance_handle;
 };
+
+template <>
+struct TracksAdditions<StaticMeshComponent> : std::true_type {};
 
 } // namespace lumina::core::components

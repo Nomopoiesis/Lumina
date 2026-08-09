@@ -4,9 +4,15 @@
 #include "core/entity.hpp"
 
 #include <atomic>
+#include <span>
+#include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 namespace lumina::core::components {
+
+template <typename T>
+struct TracksAdditions : std::false_type {};
 
 // Type-erased view of a component storage, so World can drop every component
 // belonging to an entity without knowing which component types exist.
@@ -25,6 +31,7 @@ public:
   // Not safe to call while iterating the same storage with ForEach.
   virtual auto Destroy(EntityID id) -> void = 0;
   [[nodiscard]] virtual auto Has(EntityID id) const -> bool = 0;
+  virtual auto ClearAdditions() -> void = 0;
 };
 
 // Dense index assigned to each component type on first use, used to slot
@@ -63,8 +70,22 @@ public:
   template <typename Func>
   auto ForEach(Func &&func) -> void;
 
+  [[nodiscard]] auto GetAdded() const -> std::span<const EntityID> {
+    static_assert(TracksAdditions<T>::value,
+                  "Component does not track additions; specialise "
+                  "TracksAdditions<T> to enable it");
+    return added_;
+  }
+
+  auto ClearAdditions() -> void override {
+    added_.clear();
+    added_.swap(pending_);
+  }
+
 private:
   std::unordered_map<EntityID, T> data_;
+  std::vector<EntityID> added_;
+  std::vector<EntityID> pending_;
 };
 
 template <typename T>
@@ -74,6 +95,9 @@ auto ComponentStorage<T>::Create(EntityID id, Args &&...args) -> void {
       std::is_constructible_v<T, Args...> && std::is_default_constructible_v<T>,
       "T must be constructible from Args... and default constructible");
   data_[id] = T(std::forward<Args>(args)...);
+  if constexpr (TracksAdditions<T>::value) {
+    pending_.push_back(id);
+  }
 }
 
 template <typename T>

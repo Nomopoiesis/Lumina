@@ -15,7 +15,7 @@ public:
   World() = default;
   ~World() = default;
 
-  auto CreateEntity() -> EntityID;
+  auto CreateEntity(Mobility mobility = Mobility::Dynamic) -> EntityID;
   auto DestroyEntity(EntityID id) -> void;
   auto GetEntity(EntityID id) -> std::optional<Entity>;
 
@@ -49,6 +49,11 @@ public:
     return GetTransform(id).position;
   }
 
+  template <typename T>
+  [[nodiscard]] auto GetAddedComponents() -> std::span<const EntityID>;
+
+  auto ClearAdditions() -> void;
+
 private:
   EntityManager entity_manager;
   EntityID active_camera_id = INVALID_ENTITY_ID;
@@ -65,7 +70,13 @@ private:
 
 template <typename T, typename... Args>
 auto World::AddComponent(EntityID id, Args &&...args) -> void {
-  GetComponentStorage<T>()->Create(id, std::forward<Args>(args)...);
+  if constexpr (std::is_same_v<T, components::Transform>) {
+    GetComponentStorage<T>()->Create(
+        id, std::forward<Args>(args)...,
+        entity_manager.GetEntity(id)->GetMobility());
+  } else {
+    GetComponentStorage<T>()->Create(id, std::forward<Args>(args)...);
+  }
 }
 
 template <typename T>
@@ -100,6 +111,11 @@ auto World::GetComponentStorage() -> components::ComponentStorage<T> * {
   }
   return static_cast<components::ComponentStorage<T> *>(
       component_storages[type_index].get());
+}
+
+template <typename T>
+auto World::GetAddedComponents() -> std::span<const EntityID> {
+  return GetComponentStorage<T>()->GetAdded();
 }
 
 template <typename T, typename Func>

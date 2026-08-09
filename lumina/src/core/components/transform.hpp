@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/lumina_assert.hpp"
+#include "common/lumina_check.hpp"
 #include "core/engine_coordinates.hpp"
 #include "math/quaternion.hpp"
 #include "math/vector.hpp"
@@ -104,14 +105,20 @@ public:
   ~ComponentStorage() override = default;
 
   auto Create(EntityID id, const math::Vec3 &position,
-              const math::Vec3 &rotation, const math::Vec3 &scale) -> void;
-  auto Create(EntityID id, const Transform &transform) -> void;
+              const math::Vec3 &rotation, const math::Vec3 &scale,
+              Mobility mobility = Mobility::Dynamic) -> void;
+  auto Create(EntityID id, const Transform &transform,
+              Mobility mobility = Mobility::Dynamic) -> void;
 
   auto Get(EntityID id) -> Transform;
   auto Set(EntityID id, const Transform &component) -> void;
 
   auto Destroy(EntityID id) -> void override;
   [[nodiscard]] auto Has(EntityID id) const -> bool override;
+
+  // Transforms are not watched for additions - no system derives work from
+  // "a transform appeared" - so this specialisation keeps no log to swap.
+  auto ClearAdditions() -> void override {}
 
 private:
   // SOA layout - parallel arrays, one entry per registered entity.
@@ -126,6 +133,7 @@ private:
   std::vector<f32> scale_x;
   std::vector<f32> scale_y;
   std::vector<f32> scale_z;
+  std::vector<Mobility> mobility_;
   // Reverse of entity_to_index, needed to repoint the entity that gets moved
   // into a freed slot by Destroy's swap-and-pop.
   std::vector<EntityID> index_to_entity;
@@ -135,8 +143,8 @@ private:
 inline auto ComponentStorage<Transform>::Create(EntityID id,
                                                 const math::Vec3 &position,
                                                 const math::Vec3 &rotation,
-                                                const math::Vec3 &scale)
-    -> void {
+                                                const math::Vec3 &scale,
+                                                Mobility mobility) -> void {
   auto index = pos_x.size();
   pos_x.push_back(position.x);
   pos_y.push_back(position.y);
@@ -147,14 +155,15 @@ inline auto ComponentStorage<Transform>::Create(EntityID id,
   scale_x.push_back(scale.x);
   scale_y.push_back(scale.y);
   scale_z.push_back(scale.z);
+  mobility_.push_back(mobility);
   index_to_entity.push_back(id);
   entity_to_index[id] = index;
 }
 
 inline auto ComponentStorage<Transform>::Create(EntityID id,
-                                                const Transform &transform)
-    -> void {
-  Create(id, transform.position, transform.rotation, transform.scale);
+                                                const Transform &transform,
+                                                Mobility mobility) -> void {
+  Create(id, transform.position, transform.rotation, transform.scale, mobility);
 }
 
 inline auto ComponentStorage<Transform>::Get(EntityID id) -> Transform {
@@ -179,6 +188,8 @@ inline auto ComponentStorage<Transform>::Set(EntityID id,
   if (entry == entity_to_index.end()) {
     return;
   }
+  LUMINA_CHECK(mobility_[entry->second] == Mobility::Dynamic,
+               "Cannot set transform component of static entity");
   auto index = entry->second;
   pos_x[index] = component.position.x;
   pos_y[index] = component.position.y;
@@ -212,6 +223,7 @@ inline auto ComponentStorage<Transform>::Destroy(EntityID id) -> void {
     scale_x[index] = scale_x[last];
     scale_y[index] = scale_y[last];
     scale_z[index] = scale_z[last];
+    mobility_[index] = mobility_[last];
 
     const auto moved_entity = index_to_entity[last];
     index_to_entity[index] = moved_entity;
@@ -227,6 +239,7 @@ inline auto ComponentStorage<Transform>::Destroy(EntityID id) -> void {
   scale_x.pop_back();
   scale_y.pop_back();
   scale_z.pop_back();
+  mobility_.pop_back();
   index_to_entity.pop_back();
   entity_to_index.erase(id);
 }

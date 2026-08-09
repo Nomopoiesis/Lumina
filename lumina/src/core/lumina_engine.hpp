@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <memory>
 
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
+#include "common/profiling/profiler.hpp"
 #include "common/timer.hpp"
 #include "debug_overlay.hpp"
 #include "debug_overlay_controller.hpp"
@@ -164,6 +166,13 @@ private:
   FrameTimeInfo frame_time_info{};
   FrameStats frame_stats{};
   DebugOverlay debug_overlay{};
+
+  // Last frame's zone snapshot, plus an exponential moving average per zone.
+  // Raw per-frame zone times swing too much to read at the overlay's refresh
+  // rate; the EMA is indexed by zone id, which is why EndFrame writes samples
+  // at their id rather than packed.
+  profiling::FrameProfile frame_profile{};
+  std::array<f64, profiling::MaxZones> zone_seconds_ema{};
 
   std::unique_ptr<CameraMovementController> camera_movement_controller;
   std::unique_ptr<DebugOverlayController> debug_overlay_controller;

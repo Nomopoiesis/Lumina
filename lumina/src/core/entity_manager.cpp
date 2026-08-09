@@ -2,14 +2,15 @@
 
 namespace lumina::core {
 
-auto EntityManager::CreateEntity() -> EntityID {
+auto EntityManager::CreateEntity(Mobility mobility) -> EntityID {
   EntityID id{};
   if (free_indices.empty()) {
     id.index = next_index++;
-    entities.emplace_back();
+    entities.emplace_back(0, Entity(mobility));
   } else {
     id.index = free_indices.back();
     free_indices.pop_back();
+    entities[id.index].entity = Entity(mobility);
   }
   entities[id.index].generation++;
   id.generation = entities[id.index].generation;

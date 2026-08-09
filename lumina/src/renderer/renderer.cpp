@@ -6,6 +6,7 @@
 #include "common/lumina_check.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/path_registry.hpp"
+#include "common/profiling/profiler.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
@@ -1724,6 +1725,11 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
                                          VkCommandBuffer command_buffer,
                                          u32 image_index) noexcept
     -> std::expected<void, VkInitializationError> {
+  // Detached: this runs on the render thread, so its span can straddle the
+  // update thread's frame boundary and it must stay out of the accounted /
+  // unaccounted arithmetic. Read it as "render thread work near this frame".
+  LUMINA_PROFILE_SCOPE_DETACHED("Record");
+
   VkImageMemoryBarrier depth_image_memory_barrier = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
       .pNext = nullptr,

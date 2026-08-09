@@ -25,5 +25,5 @@ target_sources(
 
 target_link_libraries(
   lumina_renderer PRIVATE lumina_common lumina_common_terminate lumina_stb
-                          lumina_path_registry)
+                          lumina_path_registry lumina_profiling)
 target_link_libraries(lumina_renderer PUBLIC Vulkan::Vulkan glm::glm)

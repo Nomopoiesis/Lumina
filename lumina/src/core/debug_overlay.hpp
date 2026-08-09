@@ -1,8 +1,11 @@
 #pragma once
 
 #include "common/lumina_types.hpp"
+#include "common/profiling/profiler.hpp"
 
 #include <array>
+#include <format>
+#include <span>
 
 namespace lumina::core {
 
@@ -17,6 +20,13 @@ struct DebugOverlayStats {
   // trails the frame being updated. Fine for a diagnostic read a few times a
   // second, and it is the number the draw submission work is judged on.
   u32 draw_calls = 0;
+
+  // Zone snapshot from the last completed frame, paired with the smoothed
+  // seconds the rows actually print. Both are indexed by zone id, so element i
+  // of one describes element i of the other, and entries with a null name are
+  // unregistered slots to skip. Empty when profiling is compiled out.
+  std::span<const profiling::ZoneSample> zone_samples;
+  std::span<const f64> zone_seconds_ema;
 };
 
 class DebugOverlay {
@@ -29,10 +39,29 @@ public:
   [[nodiscard]] auto IsVisible() const -> bool { return visible; }
 
 private:
-  static constexpr u32 MAX_ROWS = 4;
+  // Two fixed rows, the frame root, its phases, the unaccounted gap, and the
+  // render-thread zones. Sized for the handful of phase zones that aggregate
+  // counters are the right tool for rather than for profiling::MaxZones —
+  // AppendRow drops anything past the end rather than overrunning.
+  static constexpr u32 MAX_ROWS = 20;
   static constexpr u32 ROW_CAPACITY = 64;
 
   auto RefreshRows(const DebugOverlayStats &stats) -> void;
+
+  // Formats one row into the next free buffer. Truncates at ROW_CAPACITY and
+  // silently drops the row once MAX_ROWS is reached, so a zone table larger
+  // than the overlay costs visibility, never memory safety.
+  template <typename... Args>
+  auto AppendRow(std::format_string<Args...> fmt, Args &&...args) -> void {
+    if (row_count >= MAX_ROWS) {
+      return;
+    }
+    auto &row = rows[row_count];
+    const auto result = std::format_to_n(row.data(), ROW_CAPACITY, fmt,
+                                         std::forward<Args>(args)...);
+    row_lengths[row_count] = static_cast<u32>(result.out - row.data());
+    ++row_count;
+  }
 
   bool visible = true;
 

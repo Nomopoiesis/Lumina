@@ -39,3 +39,7 @@ target_include_directories(
 target_link_libraries(
   lumina_core PRIVATE lumina_common lumina_platform_common lumina_renderer
                       lumina_common_terminate lumina_data_parsers lumina_stb)
+
+# PUBLIC because lumina_engine.hpp holds a FrameProfile by value, so anything
+# including it needs the profiler header on its path.
+target_link_libraries(lumina_core PUBLIC lumina_profiling)

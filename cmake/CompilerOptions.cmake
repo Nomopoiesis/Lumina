@@ -1,5 +1,13 @@
 # Compiler-specific options and warnings
 
+# CPU zone profiling, on for every configuration that exists today. Performance
+# is measured in Release, so a Debug-only profiler — the ASSERT pattern — would
+# instrument the build nobody profiles. Written as a per-config expression so a
+# future shipping configuration switches it off by name rather than by editing
+# call sites.
+add_compile_definitions(
+  "LUMINA_PROFILING_ENABLED=$<IF:$<CONFIG:Shipping>,0,1>")
+
 # Emit a PDB for every configuration, Release included. Optimizations and NDEBUG
 # stay exactly as they were, so release-only bugs still reproduce; the symbols
 # just make the resulting crash readable in a debugger.

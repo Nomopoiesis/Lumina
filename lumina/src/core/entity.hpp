@@ -2,10 +2,16 @@
 
 #include "lumina_types.hpp"
 
+#include <format>
 #include <functional>
 #include <limits>
 
 namespace lumina::core {
+
+enum class Mobility : u8 {
+  Static,
+  Dynamic,
+};
 
 using EntityIndexType = u32;
 
@@ -23,13 +29,17 @@ constexpr EntityID INVALID_ENTITY_ID = {
 class Entity {
 public:
   Entity() = default;
+  Entity(Mobility mobility) : mobility(mobility) {}
   Entity(const Entity &) = default;
   auto operator=(const Entity &) -> Entity & = default;
   Entity(Entity &&) noexcept = default;
   auto operator=(Entity &&) noexcept -> Entity & = default;
   ~Entity() = default;
 
+  [[nodiscard]] auto GetMobility() const -> Mobility { return mobility; }
+
 private:
+  Mobility mobility = Mobility::Dynamic;
 };
 
 } // namespace lumina::core
@@ -41,6 +51,13 @@ struct hash<lumina::core::EntityID> {
   auto operator()(const lumina::core::EntityID &id) const noexcept -> size_t {
     return std::hash<u64>{}((static_cast<u64>(id.index) << 32) |
                             static_cast<u64>(id.generation));
+  }
+};
+
+template <>
+struct formatter<lumina::core::EntityID> : formatter<string_view> {
+  auto format(const lumina::core::EntityID &id, format_context &ctx) const {
+    return std::format_to(ctx.out(), "{}:{}", id.index, id.generation);
   }
 };
 

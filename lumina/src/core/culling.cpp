@@ -1,5 +1,6 @@
 #include "culling.hpp"
 
+#include "common/profiling/profiler.hpp"
 #include "job_system/job_manager.hpp"
 #include "math/matrix.hpp"
 
@@ -31,6 +32,11 @@ namespace {
 
 auto CullProxies(const DrawableProxyManager &proxies, const Frustum &frustum,
                  BatchedVisibilityIndex &visibility) -> void {
+  // Wall time, so this includes the fiber sitting parked in WaitForCounter
+  // while workers chew through chunks. That is "how long the cull took", not
+  // "how much CPU the cull burned" — the latter needs the per-thread breakdown.
+  LUMINA_PROFILE_SCOPE("Cull");
+
   const auto count = proxies.ProxyCount();
   visibility.Reset(count, CullBatchSize);
 
