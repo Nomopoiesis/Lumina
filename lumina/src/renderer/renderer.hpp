@@ -22,11 +22,21 @@
 #include "common/data_structures/lock_free_object_pool.hpp"
 
 #include <atomic>
+#include <optional>
 #include <semaphore>
 #include <thread>
 #include <vector>
 
 namespace lumina::renderer {
+
+// Side of the square pixel neighbourhood a pick samples, and therefore the side
+// of the pick render target: one target pixel per screen pixel. Larger is more
+// forgiving on thin geometry and costs nothing measurable at this size.
+//
+// Defined here rather than engine-side because both ends must agree — the
+// renderer sizes the target with it and the engine derives the pick projection's
+// zoom from it. Two constants that had to match would eventually stop matching.
+inline constexpr u32 PICK_REGION_SIZE = 9;
 
 using GraphicsPipelineManager = core::ResourceRegistry<GraphicsPipeline>;
 using RenderMeshManager = core::ResourceRegistry<RenderMesh>;
@@ -181,6 +191,10 @@ public:
     debug_wireframe_material_template_handle = handle;
   }
 
+  auto SetPickIdMaterialTemplate(MaterialTemplateHandle handle) -> void {
+    pick_id_material_template_handle = handle;
+  }
+
   [[nodiscard]] auto GetDebugWireframeMaterialTemplateHandle() const noexcept
       -> MaterialTemplateHandle {
     return debug_wireframe_material_template_handle;
@@ -195,7 +209,36 @@ public:
     return draw_item_registry;
   }
 
+  // Returns the slot of the most recent pick if it has not been seen yet, and
+  // advances `last_sequence`. Slot 0 means the pick hit nothing.
+  //
+  // There is one readback buffer, so only one frame may carry a pick at a time.
+  // That is enforced by the caller — see LuminaEngine::pick_in_flight — which
+  // means **every path that abandons a pick must still publish a result here**,
+  // or the caller never learns it may issue another. The two are RecordPickPass
+  // giving up on an unready pipeline, and DrawFrame abandoning a frame on
+  // swapchain recreation. Both are silent and permanent if missed.
+  [[nodiscard]] auto TakePickResult(u32 &last_sequence) -> std::optional<u32> {
+    const u64 packed = pick_result.load(std::memory_order_acquire);
+    const auto sequence = static_cast<u32>(packed >> 32U);
+    if (sequence == last_sequence) {
+      return std::nullopt;
+    }
+    last_sequence = sequence;
+    return static_cast<u32>(packed & 0xFFFFFFFFU);
+  }
+
 private:
+  // Sequence and slot move together so a reader can never pair a fresh sequence
+  // with a stale slot. Only one pick is ever in flight, so the read-modify-write
+  // of the sequence has no competing writer.
+  auto PublishPickResult(u32 slot) -> void {
+    const u64 previous = pick_result.load(std::memory_order_relaxed);
+    const u32 next_sequence = static_cast<u32>(previous >> 32U) + 1U;
+    pick_result.store((static_cast<u64>(next_sequence) << 32U) | slot,
+                      std::memory_order_release);
+  }
+
   [[nodiscard]] auto GetShaderInterfaceFor(const MaterialTemplate &tmpl)
       -> ShaderInterface & {
     return shader_interfaces[tmpl.GetShaderInterfaceIndex()];
@@ -207,6 +250,14 @@ private:
   auto ReleaseFrameContextForRender() -> void;
 
   auto TryReclaimFrameContexts() -> void;
+
+  // The single exit from RENDER_COMPLETE back to IDLE.
+  auto ReclaimFrameContext(FrameContext &frame_context) -> void;
+
+  // Completes GPU work whose result the CPU asked for. Called once per render
+  // loop iteration, above DrawFrame — see its definition for why that placement
+  // is both required and sufficient.
+  auto ProcessReadbacks() -> void;
 
   auto ProcessDeferredOperations() -> void;
 
@@ -220,6 +271,16 @@ private:
                            VkCommandBuffer command_buffer,
                            u32 image_index) noexcept
       -> std::expected<void, VkInitializationError>;
+
+  // Records the pick pass into the frame's command buffer, next to the scene
+  // and UI passes. Render thread only — it resolves draw items and render
+  // meshes, which ProcessDeferredOperations mutates on this same thread.
+  auto RecordPickPass(FrameContext &frame_context,
+                      VkCommandBuffer command_buffer) -> void;
+
+  // Reads the winning slot out of the readback buffer and publishes it. Called
+  // once the submission that recorded the pick has completed.
+  auto PublishPickFromReadback() -> void;
 
   auto PrepareFrameDescriptors(FrameContext &frame_context) -> void;
 
@@ -270,6 +331,32 @@ private:
   VkImage depth_image = VK_NULL_HANDLE;
   VkImageView depth_image_view = VK_NULL_HANDLE;
 
+  // picking resources
+  VkDeviceMemory pick_readback_buffer_memory = VK_NULL_HANDLE;
+  VkBuffer pick_readback_buffer = VK_NULL_HANDLE;
+  void *pick_readback_buffer_mapped = nullptr;
+  VkDeviceMemory pick_color_image_memory = VK_NULL_HANDLE;
+  VkImage pick_color_image = VK_NULL_HANDLE;
+  VkImageView pick_color_image_view = VK_NULL_HANDLE;
+  VkDeviceMemory pick_depth_image_memory = VK_NULL_HANDLE;
+  VkImage pick_depth_image = VK_NULL_HANDLE;
+  VkImageView pick_depth_image_view = VK_NULL_HANDLE;
+
+  // The frame fence of the submission carrying an outstanding pick, or NULL.
+  //
+  // Frame fences are recycled, so this is only sound because ProcessReadbacks
+  // is guaranteed to observe a signal before the fence can be reset. Replacing
+  // it with a monotonic submission counter (or a timeline semaphore) would
+  // remove that constraint entirely, and is the right move once a second
+  // readback consumer exists.
+  VkFence pending_pick_fence = VK_NULL_HANDLE;
+
+  // High 32 bits are a sequence number, low 32 the hit slot. Written by the
+  // render thread once the submission carrying the pick completes, read by the
+  // update thread; the sequence is what tells a reader a result is new rather
+  // than the one it already consumed.
+  std::atomic<u64> pick_result{0};
+
   CommandContextPool command_context_pool;
   CommandSubmissionQueue global_submission_queue{256};
   std::vector<std::pair<VkFence, std::vector<CommandContext *>>>
@@ -281,9 +368,11 @@ private:
 
   MaterialTemplateHandle default_material_template_handle;
   MaterialTemplateHandle debug_wireframe_material_template_handle;
+  MaterialTemplateHandle pick_id_material_template_handle;
   MaterialInstanceHandle default_material_instance_handle;
   GraphicsPipelineHandle default_pipeline_handle;
   GraphicsPipelineHandle debug_aabb_pipeline_handle;
+  GraphicsPipelineHandle pick_pipeline_handle;
 
   UIRenderer ui_renderer;
 

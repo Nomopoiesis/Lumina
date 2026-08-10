@@ -331,6 +331,10 @@ static auto InitializeInputActionMap(InputActionMap &input_action_map) -> void {
 
   input_action_map.BindAction(ActionID(std::string_view("ToggleDebugOverlay")),
                               KeyInputBinding(KeyCode::F1, KeyState::Pressed));
+
+  input_action_map.BindAction(
+      ActionID(std::string_view("PickEntity")),
+      MouseButtonInputBinding(MouseButton::Left, KeyState::Pressed));
 }
 
 // Groups the visible proxies into one instanced batch per draw item, using a
@@ -577,6 +581,7 @@ auto LuminaEngine::BeginFrame(Timer &timer) -> void {
   frame_time_info.simulation_delta_time = math::Clamp(delta_time, 0.0, 0.1);
   frame_time_info.total_time += delta_time;
   frame_stats.Update(delta_time);
+  input_dispatcher.Dispatch(input_state);
 }
 
 auto LuminaEngine::ProcessDeferredOperations() -> void {
@@ -610,11 +615,151 @@ auto LuminaEngine::EndFrame() -> void {
   renderer->ReleaseFrameContextForUpdate();
 }
 
+// Builds the pick projection for a requested screen pixel: a camera that sees
+// only the PICK_REGION_SIZE-wide neighbourhood under the cursor, stretched to
+// fill the whole target.
+//
+// The scale-and-translate is applied *after* the projection, in clip space,
+// which is what makes it a plain scale on x and y. Clip x is divided by clip w
+// to reach NDC, so scaling clip x scales the NDC directly, and adding a
+// multiple of clip w adds a constant to the NDC — the w cancels against the
+// divide, which is the only way to shift every object by the same amount
+// regardless of its depth. w itself must be left alone or the divide changes
+// for everything.
+static auto CalculatePickProjection(const math::Mat4 &projection,
+                                    const PickRequestPosition &pixel,
+                                    const WindowDimensions &window)
+    -> math::Mat4 {
+  const auto width = static_cast<f32>(window.width);
+  const auto height = static_cast<f32>(window.height);
+
+  // Mouse coordinates are client pixels with a top-left origin, and the passes
+  // render through a negative-height viewport, so NDC +y is the top of the
+  // screen. Hence the y remap is inverted relative to x.
+  const f32 ndc_x = (2.0F * static_cast<f32>(pixel.x) / width) - 1.0F;
+  const f32 ndc_y = 1.0F - (2.0F * static_cast<f32>(pixel.y) / height);
+
+  // One pixel spans 2/width in NDC, so the region spans 2*R/width. Stretching
+  // that to the full 2 the target covers is a factor of width/R.
+  const f32 zoom_x = width / static_cast<f32>(renderer::PICK_REGION_SIZE);
+  const f32 zoom_y = height / static_cast<f32>(renderer::PICK_REGION_SIZE);
+
+  // Row-vector convention: row 3 is the one multiplied by the incoming w, so
+  // putting the translation there is how "multiply this term by w" is spelled.
+  auto pick_transform = math::Mat4::Identity();
+  pick_transform[0].x = zoom_x;
+  pick_transform[1].y = zoom_y;
+  pick_transform[3].x = -zoom_x * ndc_x;
+  pick_transform[3].y = -zoom_y * ndc_y;
+
+  // Applied last, so it acts on clip space rather than on the world.
+  return math::Dot(projection, pick_transform);
+}
+
+// Runs on a worker fiber, gated behind pick_sync_gate so the proxy arrays it
+// reads are settled. Everything it touches is either read-only for the rest of
+// the frame (the proxy arrays, the draw item registry, the camera) or owned
+// solely by the pick (pick_visibility_index, pick_draws, pick_candidates), so
+// it needs no synchronisation of its own beyond that gate.
+auto LuminaEngine::IssuePickRequest() -> void {
+  if (!pick_request_position.has_value()) {
+    return;
+  }
+
+  LUMINA_PROFILE_SCOPE("Pick");
+
+  const auto request = *pick_request_position;
+  pick_request_position.reset();
+
+  auto camera_id = current_world->GetActiveCamera();
+  auto transform = current_world->GetTransform(camera_id);
+  auto camera = current_world->GetComponent<Camera>(camera_id);
+  auto view = CalculateViewMatrix(transform);
+  auto pick_projection = CalculatePickProjection(camera.ToProjectionMatrix(),
+                                                 request, window_dimensions);
+  auto pick_view_projection = math::Dot(view, pick_projection);
+
+  const auto pick_frustum = ExtractFrustumFromMatrix(pick_view_projection);
+
+  // Narrowed from the frame's visible set rather than culled from scratch. The
+  // pick transform only scales and translates clip x and y — z and w are
+  // untouched — so the pick frustum shares the main frustum's near and far
+  // planes and has strictly tighter sides. It is therefore contained in it, and
+  // anything the frame culled away could not have been clicked on.
+  //
+  // The one place containment leaks is a click near the window edge, where part
+  // of the region falls outside the screen. Whatever lives out there was never
+  // rendered, so dropping it is right anyway.
+  //
+  // Serial on purpose: a second FrustumCulling would contend with the main cull
+  // for the same worker pool to re-test proxies that were just rejected, and
+  // what is left here is a handful of plane tests on a click frame.
+  //
+  // Handles and matrices only — no registry lookups and no Vulkan calls. The
+  // render thread resolves the draw item when it records the pass, because
+  // resolving it here would race ProcessDeferredOperations.
+  auto *frame_context = renderer->GetFrameContextForUpdate();
+  auto &draws = frame_context->pick_draws;
+  draws.clear();
+  pick_candidates.clear();
+
+  visibility_index.ForEachVisible([&](size_t proxy_index) -> void {
+    if (pick_candidates.size() >= MAX_PICK_CANDIDATES) {
+      return;
+    }
+    if (TestAABoundingBox(pick_frustum,
+                          drawable_proxy_manager.GetProxyAABB(proxy_index)) ==
+        FrustumTestResult::Outside) {
+      return;
+    }
+    pick_candidates.push_back(drawable_proxy_manager.entity_ids[proxy_index]);
+    draws.push_back(renderer::PickDraw{
+        .mvp = math::Dot(drawable_proxy_manager.model[proxy_index],
+                         pick_view_projection),
+        .draw_item_index = drawable_proxy_manager.draw_item_indices[proxy_index],
+        // 1-based: 0 is the target's clear value and means "nothing here".
+        .slot = static_cast<u32>(pick_candidates.size()),
+    });
+  });
+
+  // A click on empty sky. Resolved here rather than round-tripping an empty
+  // pass through the GPU — the answer is already known, and clearing the flag
+  // now means the next click is accepted immediately instead of a frame later.
+  if (draws.empty()) {
+    ResolvePick(0);
+  }
+}
+
+auto LuminaEngine::ResolvePick(u32 slot) -> void {
+  const auto previous = picked_entity_id;
+  picked_entity_id = (slot == 0 || slot > pick_candidates.size())
+                         ? INVALID_ENTITY_ID
+                         : pick_candidates[slot - 1];
+  pick_in_flight = false;
+
+  if (picked_entity_id != previous) {
+    LOG_INFO("Picked entity: {}", picked_entity_id);
+  }
+}
+
+auto LuminaEngine::PollPickResult() -> void {
+  if (auto slot_opt = renderer->TakePickResult(last_pick_sequence);
+      slot_opt.has_value()) {
+    ResolvePick(slot_opt.value());
+  }
+}
+
 auto LuminaEngine::ExecuteFrame() -> void {
   // The frame root. Everything the update thread does is inside this span, so
   // it is the denominator the phase zones and the unaccounted row are read
   // against. Exactly one call site may use LUMINA_PROFILE_FRAME.
   LUMINA_PROFILE_FRAME("Update");
+
+  // Consumed at the head of the frame rather than beside the request that
+  // produced it: a pick answer takes one or two frames to come back, so this
+  // collects whatever the render thread published since last frame. It is an
+  // atomic load, not a wait.
+  PollPickResult();
 
   // Dispatch upload jobs for any meshes not yet uploaded to the GPU.
   // Track dispatched handles locally to avoid multiple jobs for the same mesh
@@ -690,7 +835,16 @@ auto LuminaEngine::ExecuteFrame() -> void {
     });
   }
 
-  auto *frame_sync_counter = job_system::GetJobManager().AllocateCounter(2);
+  // The pick job is conditional, so the counter it signals has to be sized to
+  // match. A count that outruns the jobs actually submitted never reaches zero
+  // and hangs the frame in WaitForCounter.
+  const bool has_pick_request = pick_request_position.has_value();
+  auto *frame_sync_counter =
+      job_system::GetJobManager().AllocateCounter(has_pick_request ? 3 : 2);
+  pick_sync_gate = has_pick_request
+                       ? job_system::GetJobManager().AllocateCounter(1)
+                       : nullptr;
+
   auto *job = job_system::GetJobManager().AcquireJob();
   job->execute = [](void *data) {
     renderer::UpdateFrameUniforms(*static_cast<LuminaEngine *>(data));
@@ -706,9 +860,14 @@ auto LuminaEngine::ExecuteFrame() -> void {
     auto *frame_context = engine->renderer->GetFrameContextForUpdate();
     frame_context->draw_batches.clear();
     frame_context->debug_draws.clear();
+    // Cleared unconditionally, like the lists above. IssuePickRequest only runs
+    // on frames that requested a pick, so leaving it to that would let a
+    // context still holding a consumed pick re-record it.
+    frame_context->pick_draws.clear();
     engine->drawable_proxy_manager.Sync(
         *engine->current_world, engine->static_mesh_manager.GetRegistry(),
         *engine->renderer);
+
     auto camera_id = engine->current_world->GetActiveCamera();
     auto transform = engine->current_world->GetTransform(camera_id);
     auto camera = engine->current_world->GetComponent<Camera>(camera_id);
@@ -718,7 +877,15 @@ auto LuminaEngine::ExecuteFrame() -> void {
 
     auto &proxy_manager = engine->drawable_proxy_manager;
     auto &visibility = engine->visibility_index;
-    CullProxies(proxy_manager, frustum, visibility);
+    FrustumCulling(proxy_manager, frustum, visibility);
+
+    // Everything the pick needs is settled here: Sync is the only writer of the
+    // proxy arrays and the draw item registry, and the cull is the only writer
+    // of the visibility index. The rest of this job only reads them, so the
+    // pick can run beside the draw-list build.
+    if (engine->pick_sync_gate != nullptr) {
+      job_system::GetJobManager().Signal(engine->pick_sync_gate);
+    }
 
     engine->renderer->EnsureInstanceBufferCapacity(
         frame_context->GetInstanceBuffer(), visibility.GetVisibleCount());
@@ -749,9 +916,28 @@ auto LuminaEngine::ExecuteFrame() -> void {
   job->signal_counter = frame_sync_counter;
   job_system::GetJobManager().SubmitJob(job);
 
-  input_dispatcher.Dispatch(input_state);
+  if (has_pick_request) {
+    job = job_system::GetJobManager().AcquireJob();
+    job->execute = [](void *data) -> void {
+      auto *engine = static_cast<LuminaEngine *>(data);
+      // Parks this fiber until Sync has finished rebuilding the proxy arrays.
+      // The worker picks up other jobs meanwhile, so the wait costs a context
+      // switch rather than a thread.
+      job_system::GetJobManager().WaitForCounter(engine->pick_sync_gate);
+      job_system::GetJobManager().ReleaseCounter(engine->pick_sync_gate);
+      engine->IssuePickRequest();
+    };
+    job->data = this;
+    job->signal_counter = frame_sync_counter;
+    job_system::GetJobManager().SubmitJob(job);
+  }
+
   job_system::GetJobManager().WaitForCounter(frame_sync_counter);
   job_system::GetJobManager().ReleaseCounter(frame_sync_counter);
+
+  // The pick job released the gate itself; clearing the pointer is safe only
+  // here, once that job is known to have finished.
+  pick_sync_gate = nullptr;
 
   // The profile is last frame's — EndFrame snapshots after ExecuteFrame has
   // returned — so the zone rows trail by one frame, the same as the draw call
@@ -764,6 +950,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
           std::span{frame_profile.samples.data(), frame_profile.zone_count},
       .zone_seconds_ema =
           std::span{zone_seconds_ema.data(), frame_profile.zone_count},
+      .picked_entity = picked_entity_id,
   });
 
   auto clay_commands = ui_system->EndLayout();

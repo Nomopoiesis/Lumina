@@ -57,12 +57,12 @@ public:
   [[nodiscard]] auto GetVisibleCount() const -> size_t { return visible_count; }
 
   template <typename F>
-  auto ForEachVisible(F &&emit) const -> void {
+  auto ForEachVisible(F &&func) const -> void {
     for (size_t chunk = 0; chunk < GetChunkCount(); ++chunk) {
       const size_t base = chunk * batch_size_;
       const size_t visible = GetChunkSize(chunk);
       for (size_t n = 0; n < visible; ++n) {
-        emit(GetVisibleIndex(base + n));
+        func(GetVisibleIndex(base + n));
       }
     }
   }
@@ -126,6 +126,11 @@ public:
   std::vector<f32> extent_x, extent_y, extent_z;
   std::vector<math::Mat4> model;
   std::vector<u32> draw_item_indices;
+
+  // The proxy -> entity direction, which nothing else records: the cull and the
+  // draw-list build only ever need the index. Picking resolves a hit proxy back
+  // to the entity that owns it through this.
+  std::vector<EntityID> entity_ids;
 
   std::vector<EntityID> pending_static_entities;
   std::vector<EntityID> dynamic_entities;

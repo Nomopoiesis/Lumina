@@ -12,6 +12,7 @@ struct GraphicsPipelineDesc {
   VertexBufferLayout vertex_layout;
   MaterialTemplateHandle material_template;
   PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+  std::vector<VkFormat> color_attachment_formats;
 };
 
 struct GraphicsPipeline {

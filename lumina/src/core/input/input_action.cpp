@@ -14,16 +14,17 @@ auto InputActionMap::GatherActions(const InputState &input_state)
     const auto [is_active, key_state] =
         GetActiveBindingState(binding, input_state);
     if (is_active) {
-      const auto [x, y] = input_state.GetMouseDelta();
+      const auto [dx, dy] = input_state.GetMouseDelta();
+      const auto [x, y] = input_state.GetMousePosition();
       f32 axis_value = 0.0F;
       std::visit(
           [&](auto &&b) -> void {
             using T = std::decay_t<decltype(b)>;
             if constexpr (std::is_same_v<T, MouseAxisBinding>) {
               if (b.mouse_axis == MouseAxis::X) {
-                axis_value = static_cast<f32>(x);
+                axis_value = static_cast<f32>(dx);
               } else if (b.mouse_axis == MouseAxis::Y) {
-                axis_value = static_cast<f32>(y);
+                axis_value = static_cast<f32>(dy);
               }
             }
           },
@@ -32,6 +33,8 @@ auto InputActionMap::GatherActions(const InputState &input_state)
           .action_id = action_id,
           .key_state = key_state,
           .axis_value = axis_value,
+          .x = x,
+          .y = y,
       });
     }
   }

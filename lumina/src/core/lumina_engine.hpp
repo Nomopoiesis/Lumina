@@ -29,6 +29,12 @@ class LuminaEngine;
 class UISystem;
 } // namespace lumina::core
 
+namespace lumina::core::job_system {
+// Only ever held here as a pointer, so the job system's headers stay out of
+// everything that includes the engine.
+struct Counter;
+} // namespace lumina::core::job_system
+
 namespace lumina::renderer {
 auto UpdateFrameUniforms(lumina::core::LuminaEngine &engine) -> void;
 } // namespace lumina::renderer
@@ -44,6 +50,11 @@ struct FrameTimeInfo {
   f64 delta_time;
   f64 simulation_delta_time;
   f64 total_time;
+};
+
+struct PickRequestPosition {
+  i32 x;
+  i32 y;
 };
 
 class LuminaEngine {
@@ -97,6 +108,29 @@ public:
 
   [[nodiscard]] auto GetWindowDimensions() const -> const WindowDimensions & {
     return window_dimensions;
+  }
+
+  // Ignored while an earlier pick is still unanswered. The answer takes a frame
+  // or two to come back and there is one readback buffer behind it, so a click
+  // arriving in that window is dropped rather than queued.
+  auto RequestEntityPickAt(i32 x, i32 y) -> void {
+    if (pick_in_flight) {
+      return;
+    }
+    pick_in_flight = true;
+    pick_request_position = PickRequestPosition{.x = x, .y = y};
+  }
+
+  [[nodiscard]] auto GetPickRequestPosition() const
+      -> const std::optional<PickRequestPosition> & {
+    return pick_request_position;
+  }
+
+  // The entity most recently resolved by a pick, or INVALID_ENTITY_ID if the
+  // last pick hit nothing. Trails a click by a frame or two: the pick result
+  // comes back from the GPU asynchronously.
+  [[nodiscard]] auto GetPickedEntity() const -> EntityID {
+    return picked_entity_id;
   }
 
   [[nodiscard]] auto GetFrameTimeInfo() const -> const FrameTimeInfo & {
@@ -205,6 +239,47 @@ private:
   std::unordered_map<std::string, Font> fonts;
   std::unique_ptr<UISystem> ui_system;
   StaticMeshHandle debug_aabb_mesh_handle;
+
+  // entity picking
+  auto IssuePickRequest() -> void;
+  auto PollPickResult() -> void;
+
+  // The one place a pick slot becomes a selection, and the one place the
+  // in-flight flag clears. Both outcomes route through it: a slot read back
+  // from the GPU, and a click that found no candidates at all.
+  auto ResolvePick(u32 slot) -> void;
+
+  std::optional<PickRequestPosition> pick_request_position;
+  EntityID picked_entity_id = INVALID_ENTITY_ID;
+
+  // Update-thread only, so a plain bool: set when a request is accepted,
+  // cleared when its answer lands. It guards the renderer's single readback
+  // buffer from a second concurrent pick, which is why the renderer must report
+  // a result even on the paths where it abandons one — see TakePickResult.
+  bool pick_in_flight = false;
+
+  // The entity behind each slot written into the pick target, indexed by
+  // slot - 1. Held until the result comes back so a hit resolves through the
+  // request that produced it: looking the index up in the EntityManager one or
+  // two frames later would select whoever inherited the slot if the original
+  // entity died in between.
+  std::vector<EntityID> pick_candidates;
+  u32 last_pick_sequence = 0;
+
+  // Opened by the draw-list job once Sync and the main cull have both finished
+  // — the pick narrows the visible set they produce, and Sync reallocates the
+  // proxy arrays out from under any job that reads them early. Everything after
+  // that point in the job only reads, so the pick still overlaps the draw-list
+  // build rather than trailing the whole frame.
+  //
+  // Non-null only on frames that actually issue a pick: the draw-list job
+  // signals it if set, and the pick job releases it after waking.
+  job_system::Counter *pick_sync_gate = nullptr;
+
+  // A pick frustum is a needle, so this stays tiny — but a click down a long
+  // corridor of 50k entities could still find a great many. The GPU resolves
+  // them correctly either way; the cap is only there to keep the pass bounded.
+  static constexpr size_t MAX_PICK_CANDIDATES = 256;
 };
 
 } // namespace lumina::core

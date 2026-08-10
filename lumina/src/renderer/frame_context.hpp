@@ -46,6 +46,20 @@ struct DrawDebugAABBCommand {
   math::Mat4 model;
 };
 
+// One object drawn into the pick target, one instance each. `mvp` is
+// pre-multiplied model * view * pick_proj because the pick pass uses a
+// projection the frame globals do not carry, and `slot` is 1-based so 0 stays
+// the clear value meaning "nothing here".
+//
+// A draw item index rather than resolved objects, the same as DrawMeshBatch:
+// resolving it reads the resource registries, which the render thread mutates
+// in ProcessDeferredOperations, so that lookup belongs at record time.
+struct PickDraw {
+  math::Mat4 mvp;
+  u32 draw_item_index = 0;
+  u32 slot = 0;
+};
+
 struct FrameContextUniformBuffer {
   FrameContextUniformBuffer() noexcept = default;
   FrameContextUniformBuffer(const FrameContextUniformBuffer &) = delete;
@@ -154,6 +168,12 @@ public:
   // debug wireframes on top.
   std::vector<DrawMeshBatch> draw_batches;
   std::vector<DrawDebugAABBCommand> debug_draws;
+
+  // Non-empty only on a frame carrying a pick request, which the renderer's
+  // in-flight guard limits to one at a time. The render thread reads this to
+  // decide whether to record the pick pass, and again on reclaim to decide
+  // whether a result is waiting in the readback buffer.
+  std::vector<PickDraw> pick_draws;
 
 private:
   VulkanContext &vulkan_context;

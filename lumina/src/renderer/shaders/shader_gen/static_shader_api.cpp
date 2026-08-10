@@ -3,6 +3,8 @@
 #include "common/lumina_check.hpp"
 #include "common/path_registry.hpp"
 #include "headers/color_output.frag.hpp"
+#include "headers/in_id_out_id.frag.hpp"
+#include "headers/in_position_out_id.vert.hpp"
 #include "headers/interface.global.hpp"
 #include "headers/position_only.vert.hpp"
 #include "headers/simple_input_basic_mat.frag.hpp"
@@ -16,9 +18,9 @@
 namespace lumina::renderer {
 
 auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
+  namespace global = lumina::shaders::interface::global;
   namespace vert = lumina::shaders::simple_model_input::vert;
   namespace frag = lumina::shaders::simple_input_basic_mat::frag;
-  namespace global = lumina::shaders::interface::global;
 
   auto shader_interface_result = ShaderInterface::Create(
       renderer->GetVulkanContext().GetDevice(), vert::kLayout, frag::kLayout,
@@ -85,6 +87,37 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
   auto dbg_mat_template_handle = renderer->CreateMaterialTemplate(dbg_mat_desc);
 
   renderer->SetDebugWireframeMaterialTemplate(dbg_mat_template_handle);
+
+  namespace pick_id_vert = lumina::shaders::in_position_out_id::vert;
+  namespace pick_id_frag = lumina::shaders::in_id_out_id::frag;
+  auto pick_interface_result = ShaderInterface::Create(
+      renderer->GetVulkanContext().GetDevice(), pick_id_vert::kLayout,
+      pick_id_frag::kLayout, "pick_id",
+      renderer->GetGlobalDescriptorSetLayout(), global::kLayout);
+  if (!pick_interface_result) {
+    LOG_CRITICAL("Failed to create pick id shader interface: {}",
+                 pick_interface_result.error().message);
+    LUMINA_TERMINATE();
+  }
+  auto pick_interface_index =
+      renderer->AddShaderInterface(std::move(pick_interface_result.value()));
+
+  MaterialTemplateDescription pick_id_mat_desc = {
+      .shader_interface_index = pick_interface_index,
+      .vertex_layout = pick_id_vert::kLayout,
+      .fragment_layout = pick_id_frag::kLayout,
+      .vertex_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                    .shaders.Resolve("pick_id.vert.spv")
+                                    .string(),
+      .fragment_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                      .shaders.Resolve("pick_id.frag.spv")
+                                      .string(),
+      .max_instances = 0,
+  };
+  auto pick_id_mat_template_handle =
+      renderer->CreateMaterialTemplate(pick_id_mat_desc);
+
+  renderer->SetPickIdMaterialTemplate(pick_id_mat_template_handle);
 }
 
 auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)

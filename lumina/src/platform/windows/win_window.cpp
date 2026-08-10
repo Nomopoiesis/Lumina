@@ -220,6 +220,11 @@ auto Window::ProcessMouseMovement() -> void {
     auto delta_y = cursor_pos.y - previous_mouse_position.y;
     input.SetMouseDelta(delta_x, delta_y);
 
+    // Client-space, top-left origin — the coordinate space anything sampling
+    // the screen at the cursor expects. Only the delta was published before,
+    // which left GetMousePosition reading (0, 0) for the whole untrapped path.
+    input.SetMousePosition(cursor_pos.x, cursor_pos.y);
+
     // Update position
     previous_mouse_position = cursor_pos;
   }

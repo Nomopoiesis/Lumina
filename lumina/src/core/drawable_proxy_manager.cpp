@@ -62,6 +62,8 @@ auto DrawableProxyManager::ProcessProxy(
       static_mesh->render_mesh_handle);
   draw_item_indices.push_back(draw_item_index);
 
+  entity_ids.push_back(entity_id);
+
   return true;
 }
 
@@ -91,6 +93,7 @@ auto DrawableProxyManager::Sync(
   extent_z.resize(static_proxy_count);
   model.resize(static_proxy_count);
   draw_item_indices.resize(static_proxy_count);
+  entity_ids.resize(static_proxy_count);
 
   // Process pending static entities that were added since the last frame.
   ProcessPendingStaticEntities(world, static_mesh_registry, renderer);

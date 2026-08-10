@@ -2,6 +2,7 @@
 
 #include "common/lumina_types.hpp"
 #include "common/profiling/profiler.hpp"
+#include "entity.hpp"
 
 #include <array>
 #include <format>
@@ -27,6 +28,9 @@ struct DebugOverlayStats {
   // unregistered slots to skip. Empty when profiling is compiled out.
   std::span<const profiling::ZoneSample> zone_samples;
   std::span<const f64> zone_seconds_ema;
+
+  // INVALID_ENTITY_ID when the last pick hit nothing.
+  EntityID picked_entity = INVALID_ENTITY_ID;
 };
 
 class DebugOverlay {
@@ -69,6 +73,12 @@ private:
   // change every frame are unreadable, so the numbers update a few times a
   // second while the layout below is still emitted every frame.
   f64 next_refresh_time = 0.0;
+
+  // The selection the rows were last formatted against. A click is a discrete
+  // event rather than a drifting number, so it forces a refresh instead of
+  // waiting up to REFRESH_INTERVAL_SECONDS — otherwise the overlay's own
+  // refresh rate reads as latency in the pick.
+  EntityID last_rendered_picked_entity = INVALID_ENTITY_ID;
 
   // One buffer per row rather than shared scratch: Clay stores the character
   // pointer and the render commands still dereference it during batch

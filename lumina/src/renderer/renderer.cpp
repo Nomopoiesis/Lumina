@@ -22,6 +22,7 @@
 #include <vulkan/vk_enum_string_helper.h>
 
 #include <array>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -636,17 +637,15 @@ static auto FindDepthFormat(VulkanContext &vulkan_context)
       VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 }
 
-static auto CreateDepthResources(VulkanContext &vulkan_context,
-                                 VkCommandPool &command_pool,
-                                 VkImage &depth_image,
-                                 VkImageView &depth_image_view,
-                                 VkDeviceMemory &depth_image_memory,
-                                 VkFormat &depth_stencil_format) -> bool {
+static auto
+CreateDepthResources(VulkanContext &vulkan_context, VkCommandPool &command_pool,
+                     VkImage &depth_image, VkImageView &depth_image_view,
+                     VkDeviceMemory &depth_image_memory,
+                     VkFormat &depth_stencil_format, u32 width, u32 height)
+    -> bool {
   auto depth_format = FindDepthFormat(vulkan_context);
   LUMINA_CHECK(depth_format, "Failed to find depth format");
   depth_stencil_format = depth_format.value();
-  auto width = vulkan_context.GetSwapChainImageExtent().width;
-  auto height = vulkan_context.GetSwapChainImageExtent().height;
   CreateImage(vulkan_context, depth_image, width, height, depth_image_memory,
               depth_stencil_format, VK_IMAGE_TILING_OPTIMAL,
               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -717,6 +716,37 @@ LuminaRenderer::~LuminaRenderer() noexcept {
   }
   if (depth_image_memory != VK_NULL_HANDLE) {
     vkFreeMemory(vulkan_context.GetDevice(), depth_image_memory, nullptr);
+  }
+
+  if (pick_color_image_view != VK_NULL_HANDLE) {
+    vkDestroyImageView(vulkan_context.GetDevice(), pick_color_image_view,
+                       nullptr);
+  }
+  if (pick_color_image != VK_NULL_HANDLE) {
+    vkDestroyImage(vulkan_context.GetDevice(), pick_color_image, nullptr);
+  }
+  if (pick_color_image_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), pick_color_image_memory, nullptr);
+  }
+  if (pick_depth_image_view != VK_NULL_HANDLE) {
+    vkDestroyImageView(vulkan_context.GetDevice(), pick_depth_image_view,
+                       nullptr);
+  }
+  if (pick_depth_image != VK_NULL_HANDLE) {
+    vkDestroyImage(vulkan_context.GetDevice(), pick_depth_image, nullptr);
+  }
+  if (pick_depth_image_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), pick_depth_image_memory, nullptr);
+  }
+  if (pick_readback_buffer_mapped != nullptr) {
+    vkUnmapMemory(vulkan_context.GetDevice(), pick_readback_buffer_memory);
+  }
+  if (pick_readback_buffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(vulkan_context.GetDevice(), pick_readback_buffer, nullptr);
+  }
+  if (pick_readback_buffer_memory != VK_NULL_HANDLE) {
+    vkFreeMemory(vulkan_context.GetDevice(), pick_readback_buffer_memory,
+                 nullptr);
   }
 
   if (texture_sampler != VK_NULL_HANDLE) {
@@ -816,6 +846,38 @@ auto LuminaRenderer::ReleaseFrameContextForRender() -> void {
   // will signal the availability when a frame context is reclaimed
 }
 
+// Hands a frame context whose fence has signalled back to the update thread.
+// Deliberately knows nothing about what that frame produced — anything the CPU
+// wants to read back is claimed by ProcessReadbacks against its own sync point.
+auto LuminaRenderer::ReclaimFrameContext(FrameContext &frame_context) -> void {
+  frame_context.pipeline_state.store(FrameContextPipelineState::IDLE);
+  frames_available_for_update.release();
+}
+
+// Completes GPU work whose result the CPU asked for.
+//
+// Must run above DrawFrame in the loop, because DrawFrame recycles the fence
+// being polled and a result observed after that is lost. That placement is also
+// *sufficient*, which is why one call site is enough: a fence is only reset for
+// a context DrawFrame just acquired; that context had to be IDLE, which only
+// happens via reclaim; reclaim requires the fence signalled and runs at the end
+// of the loop body. So a context whose fence is reset in some iteration was
+// signalled before that iteration began, and this call sees it first.
+//
+// Nothing here depends on the frame context that carried the work. That matters
+// — the context is handed back to the update thread as soon as its fence
+// signals, which can happen before the result is claimed. The readback buffer
+// survives that because the engine will not issue a second pick until it has
+// seen the first one's answer, so there is nothing to overwrite it.
+auto LuminaRenderer::ProcessReadbacks() -> void {
+  if (pending_pick_fence != VK_NULL_HANDLE &&
+      vkGetFenceStatus(vulkan_context.GetDevice(), pending_pick_fence) ==
+          VK_SUCCESS) {
+    pending_pick_fence = VK_NULL_HANDLE;
+    PublishPickFromReadback();
+  }
+}
+
 auto LuminaRenderer::TryReclaimFrameContexts() -> void {
   // First check fence status of all RENDER_COMPLETE frame contexts
   auto pending_completion = 0;
@@ -826,8 +888,7 @@ auto LuminaRenderer::TryReclaimFrameContexts() -> void {
                                      frame_context->GetFrameBeginReadyFence());
       if (status == VK_SUCCESS) {
         // The fence is signaled, so the frame context is ready to be reused
-        frame_context->pipeline_state.store(FrameContextPipelineState::IDLE);
-        frames_available_for_update.release();
+        ReclaimFrameContext(*frame_context);
         return;
       } else {
         ++pending_completion;
@@ -846,9 +907,7 @@ auto LuminaRenderer::TryReclaimFrameContexts() -> void {
     vkWaitForFences(vulkan_context.GetDevice(), 1,
                     &frame_contexts[ctx_idx]->GetFrameBeginReadyFence(),
                     VK_TRUE, UINT64_MAX);
-    frame_contexts[ctx_idx]->pipeline_state.store(
-        FrameContextPipelineState::IDLE);
-    frames_available_for_update.release();
+    ReclaimFrameContext(*frame_contexts[ctx_idx]);
   }
 }
 
@@ -865,6 +924,9 @@ auto LuminaRenderer::RenderThread() -> void {
       "LuminaRendererThread");
   while (!shutdown_requested) {
     PollAndExecuteCommandContexts();
+    // Must stay above DrawFrame, which recycles frame fences. See its note for
+    // why that placement is sufficient as well as necessary.
+    ProcessReadbacks();
     AcquireFrameContextForRender();
     DrawFrame();
     ProcessDeferredOperations();
@@ -973,7 +1035,9 @@ auto LuminaRenderer::Initialize() -> void {
 
   auto depth_result = CreateDepthResources(
       vulkan_context, command_pool, depth_image, depth_image_view,
-      depth_image_memory, depth_stencil_format);
+      depth_image_memory, depth_stencil_format,
+      vulkan_context.GetSwapChainImageExtent().width,
+      vulkan_context.GetSwapChainImageExtent().height);
   LUMINA_CHECK(depth_result, "Failed to create depth resources");
 
   auto res = CreateTextureImage(vulkan_context, command_pool, texture_image,
@@ -989,6 +1053,37 @@ auto LuminaRenderer::Initialize() -> void {
       CreateTextureSampler(vulkan_context, texture_sampler);
   LUMINA_CHECK(texture_sampler_result, "Failed to create texture sampler");
   texture_sampler = texture_sampler_result.value();
+
+  VkDeviceSize pick_readback_buffer_size =
+      sizeof(u32) * PICK_REGION_SIZE * PICK_REGION_SIZE;
+  auto pick_readback_buffer_result = CreateBuffer(
+      vulkan_context, pick_readback_buffer_size,
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE, 0, nullptr,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+      pick_readback_buffer_memory, pick_readback_buffer);
+  LUMINA_CHECK(pick_readback_buffer_result,
+               "Failed to create pick readback buffer");
+  vkMapMemory(vulkan_context.GetDevice(), pick_readback_buffer_memory, 0,
+              pick_readback_buffer_size, 0, &pick_readback_buffer_mapped);
+  auto pick_color_image_result = CreateImage(
+      vulkan_context, pick_color_image, PICK_REGION_SIZE, PICK_REGION_SIZE,
+      pick_color_image_memory, VK_FORMAT_R32_UINT, VK_IMAGE_TILING_OPTIMAL,
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  LUMINA_CHECK(pick_color_image_result, "Failed to create pick color image");
+  // Not CreateTextureImageView: that helper hardcodes R8G8B8A8_SRGB, and a view
+  // whose format disagrees with its image is invalid.
+  auto pick_color_image_view_result = vulkan_context.CreateImageView(
+      pick_color_image, VK_FORMAT_R32_UINT, VK_IMAGE_ASPECT_COLOR_BIT);
+  LUMINA_CHECK(pick_color_image_view_result,
+               "Failed to create pick color image view");
+  pick_color_image_view = pick_color_image_view_result.value();
+  auto pick_depth_image_result = CreateDepthResources(
+      vulkan_context, command_pool, pick_depth_image, pick_depth_image_view,
+      pick_depth_image_memory, depth_stencil_format, PICK_REGION_SIZE,
+      PICK_REGION_SIZE);
+  LUMINA_CHECK(pick_depth_image_result, "Failed to create pick depth image");
 
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
     auto frame_context_result =
@@ -1058,30 +1153,62 @@ auto LuminaRenderer::Initialize() -> void {
     auto mat_opt =
         material_instance_manager.Get(default_material_instance_handle);
     LUMINA_CHECK(mat_opt.has_value(), "Default material instance not found");
-    default_pipeline_handle = CreateGraphicsPipeline(
-        {.vertex_layout = VertexBufferLayout::Interleave(
-             std::span<const core::VertexAttribute>(
-                 {core::VertexAttribute{
-                      .type = core::VertexAttributeType::Position,
-                      .element_type = core::ElementType::Vec3},
-                  core::VertexAttribute{
-                      .type = core::VertexAttributeType::Normal,
-                      .element_type = core::ElementType::Vec3},
-                  core::VertexAttribute{
-                      .type = core::VertexAttributeType::TexCoord,
-                      .element_type = core::ElementType::Vec2}})),
-         .material_template = mat_opt.value()->GetTemplateHandle()});
+    auto pipeline_desc = GraphicsPipelineDesc{
+        .vertex_layout = VertexBufferLayout::Interleave(
+            std::span<const core::VertexAttribute>(
+                {core::VertexAttribute{.type =
+                                           core::VertexAttributeType::Position,
+                                       .element_type = core::ElementType::Vec3},
+                 core::VertexAttribute{.type =
+                                           core::VertexAttributeType::Normal,
+                                       .element_type = core::ElementType::Vec3},
+                 core::VertexAttribute{
+                     .type = core::VertexAttributeType::TexCoord,
+                     .element_type = core::ElementType::Vec2}})),
+        .material_template = mat_opt.value()->GetTemplateHandle(),
+        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()}};
+    default_pipeline_handle = CreateGraphicsPipeline(pipeline_desc);
     ProcessDeferredOperations();
   }
 
-  debug_aabb_pipeline_handle = CreateGraphicsPipeline(
-      {.vertex_layout = VertexBufferLayout::Interleave(
-           std::span<const core::VertexAttribute>({core::VertexAttribute{
-               .type = core::VertexAttributeType::Position,
-               .element_type = core::ElementType::Vec3}})),
-       .material_template = debug_wireframe_material_template_handle,
-       .topology = PrimitiveTopology::LineList});
-  ProcessDeferredOperations();
+  {
+    auto pipeline_desc = GraphicsPipelineDesc{
+        .vertex_layout = VertexBufferLayout::Interleave(
+            std::span<const core::VertexAttribute>({core::VertexAttribute{
+                .type = core::VertexAttributeType::Position,
+                .element_type = core::ElementType::Vec3}})),
+        .material_template = debug_wireframe_material_template_handle,
+        .topology = PrimitiveTopology::LineList,
+        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()}};
+    debug_aabb_pipeline_handle = CreateGraphicsPipeline(pipeline_desc);
+    ProcessDeferredOperations();
+  }
+
+  {
+    // The full interleaved scene layout, not a position-only one: the pick pass
+    // draws the ordinary scene meshes, so the binding stride and attribute
+    // offsets have to describe their vertex buffers. The shader reads only
+    // location 0; ToVkAttributeDescriptions skips the rest.
+    //
+    // This does mean the pick pipeline assumes the default vertex layout. A
+    // mesh built with a different one needs its own pick pipeline variant.
+    auto pipeline_desc = GraphicsPipelineDesc{
+        .vertex_layout = VertexBufferLayout::Interleave(
+            std::span<const core::VertexAttribute>(
+                {core::VertexAttribute{.type =
+                                           core::VertexAttributeType::Position,
+                                       .element_type = core::ElementType::Vec3},
+                 core::VertexAttribute{.type =
+                                           core::VertexAttributeType::Normal,
+                                       .element_type = core::ElementType::Vec3},
+                 core::VertexAttribute{
+                     .type = core::VertexAttributeType::TexCoord,
+                     .element_type = core::ElementType::Vec2}})),
+        .material_template = pick_id_material_template_handle,
+        .color_attachment_formats = {VK_FORMAT_R32_UINT}};
+    pick_pipeline_handle = CreateGraphicsPipeline(pipeline_desc);
+    ProcessDeferredOperations();
+  }
 
   ui_renderer.Initialize(vulkan_context,
                          lumina::common::PathRegistry::Instance()
@@ -1146,6 +1273,9 @@ auto LuminaRenderer::DrawUI(FrameContext &frame_context,
 auto LuminaRenderer::DrawFrame() -> void {
   auto &frame_context = *frame_context_for_render;
 
+  // Recycles this context's fence. ProcessReadbacks, at the top of the render
+  // loop, is guaranteed to have claimed anything waiting on it first — see the
+  // note there.
   vkResetFences(vulkan_context.GetDevice(), 1,
                 &frame_context.GetFrameBeginReadyFence());
 
@@ -1156,6 +1286,14 @@ auto LuminaRenderer::DrawFrame() -> void {
       vulkan_context.GetDevice(), vulkan_context.GetSwapChain(), UINT64_MAX,
       frame_context.GetFrameBeginSemaphore(), VK_NULL_HANDLE, &image_index);
   if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    // This frame is abandoned before its command buffer is ever recorded or
+    // submitted, so a pick riding on it never reaches the readback buffer and
+    // no fence will carry it. The engine will not issue another until it sees a
+    // result, so publishing one here is what stops a single window resize from
+    // wedging picking for the rest of the run.
+    if (!frame_context.pick_draws.empty()) {
+      PublishPickResult(0);
+    }
     auto recreate_swap_chain_result = vulkan_context.RecreateSwapChain();
     if (!recreate_swap_chain_result) {
       LOG_CRITICAL("Failed to recreate swap chain: {}",
@@ -1193,6 +1331,11 @@ auto LuminaRenderer::DrawFrame() -> void {
                  record_command_buffer_result.error().message);
     LUMINA_TERMINATE();
   }
+
+  // Its own attachments, so it is independent of the scene and UI passes and
+  // only needs to be inside this command buffer. No-op on frames without a
+  // pending pick.
+  RecordPickPass(frame_context, command_buffer);
 
   DrawUI(frame_context, command_buffer, image_index);
 
@@ -1332,18 +1475,30 @@ ToVkAttributeDescriptions(const VertexBufferLayout &layout,
           break;
         }
       }
-      LUMINA_CHECK(location != UINT32_MAX,
-                   "Vertex attribute has no matching location in shader "
-                   "vertex input layout");
-      descriptions.push_back({
-          .location = location,
-          .binding = binding,
-          .format = ToVkFormat(attr.element_type),
-          .offset = offset,
-      });
+      // An attribute the shader does not read is legal and expected: the pick
+      // pass takes position out of the full scene vertex layout and ignores
+      // normal and texcoord, and a depth or shadow pass would do the same.
+      // Only the offset has to keep advancing regardless, or every attribute
+      // after the skipped one lands at the wrong place in the stride.
+      if (location != UINT32_MAX) {
+        descriptions.push_back({
+            .location = location,
+            .binding = binding,
+            .format = ToVkFormat(attr.element_type),
+            .offset = offset,
+        });
+      }
       offset += core::GetElementTypeSize(attr.element_type);
     }
   }
+
+  // The direction that actually matters, and that nothing checked before: a
+  // shader input with no attribute behind it reads undefined vertex data
+  // instead of failing. The reverse — spare attributes — is what the loop above
+  // now tolerates.
+  LUMINA_CHECK(descriptions.size() == vertex_input_layout.input_count,
+               "Shader declares a vertex input that the vertex buffer layout "
+               "does not supply");
   return descriptions;
 }
 
@@ -1663,9 +1818,10 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
   pipeline_dynamic_rendering_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
   pipeline_dynamic_rendering_info.pNext = nullptr;
-  pipeline_dynamic_rendering_info.colorAttachmentCount = 1;
+  pipeline_dynamic_rendering_info.colorAttachmentCount =
+      static_cast<u32>(desc.color_attachment_formats.size());
   pipeline_dynamic_rendering_info.pColorAttachmentFormats =
-      &vulkan_context.GetSwapChainImageFormat();
+      desc.color_attachment_formats.data();
   pipeline_dynamic_rendering_info.depthAttachmentFormat = depth_stencil_format;
   pipeline_dynamic_rendering_info.stencilAttachmentFormat =
       HasStencilComponent(depth_stencil_format) ? depth_stencil_format
@@ -1894,8 +2050,7 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
     // No push constant: the vertex shader indexes the instance buffer with
     // gl_InstanceIndex, which Vulkan defines as firstInstance + instance
     // number, so first_instance selects this batch's slice for free.
-    vkCmdDrawIndexed(command_buffer,
-                     static_cast<u32>(render_mesh->index_count),
+    vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh->index_count),
                      batch.instance_count, 0, 0, batch.first_instance);
     ++draw_calls;
   }
@@ -1911,8 +2066,8 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
     auto &pipeline = pipeline_opt.value();
     const auto &render_mesh = render_mesh_opt.value();
 
-    auto material_template_opt = material_template_manager.Get(
-        debug_wireframe_material_template_handle);
+    auto material_template_opt =
+        material_template_manager.Get(debug_wireframe_material_template_handle);
     if (!material_template_opt.has_value()) {
       continue;
     }
@@ -1929,8 +2084,8 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
     vkCmdPushConstants(command_buffer, dbg_si.GetPipelineLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
                        &debug_draw.model);
-    vkCmdDrawIndexed(command_buffer,
-                     static_cast<u32>(render_mesh->index_count), 1, 0, 0, 0);
+    vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh->index_count),
+                     1, 0, 0, 0);
     ++draw_calls;
   }
 
@@ -1949,6 +2104,207 @@ auto LuminaRenderer::AcquireCommandContext() -> CommandContext & {
 
 auto LuminaRenderer::ReleaseCommandContext(CommandContext &cmd_ctx) -> void {
   command_context_pool.Release(&cmd_ctx);
+}
+
+auto LuminaRenderer::RecordPickPass(FrameContext &frame_context,
+                                    VkCommandBuffer command_buffer) -> void {
+  const auto &draws = frame_context.pick_draws;
+  if (draws.empty()) {
+    return;
+  }
+
+  auto pipeline_opt = pipeline_manager.Get(pick_pipeline_handle);
+  auto material_template_opt =
+      material_template_manager.Get(pick_id_material_template_handle);
+  if (!pipeline_opt.has_value() || !material_template_opt.has_value()) {
+    LOG_WARNING("Pick requested before the pick pipeline was ready");
+    // Nothing is recorded, so no fence will ever carry this result. The engine
+    // will not issue another pick until it sees one, so skipping this wedges
+    // picking permanently and silently.
+    PublishPickResult(0);
+    return;
+  }
+  auto &pipeline = pipeline_opt.value();
+  auto *pipeline_layout =
+      GetShaderInterfaceFor(*material_template_opt.value()).GetPipelineLayout();
+
+  // Both attachments are fully overwritten by the clear, so discarding whatever
+  // the previous pick left in them is exactly what UNDEFINED is for.
+  VkImageMemoryBarrier attachment_barriers[] = {
+      {
+          .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+          .srcAccessMask = 0,
+          .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+          .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+          .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+          .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+          .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+          .image = pick_color_image,
+          .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+      },
+      {
+          .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+          .srcAccessMask = 0,
+          .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+          .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+          .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+          .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+          .image = pick_depth_image,
+          .subresourceRange = {static_cast<VkImageAspectFlags>(
+                                   VK_IMAGE_ASPECT_DEPTH_BIT |
+                                   (HasStencilComponent(depth_stencil_format)
+                                        ? VK_IMAGE_ASPECT_STENCIL_BIT
+                                        : 0U)),
+                               0, 1, 0, 1},
+      },
+  };
+  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                           VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+                       0, 0, nullptr, 0, nullptr, 2, attachment_barriers);
+
+  const VkExtent2D pick_extent = {PICK_REGION_SIZE, PICK_REGION_SIZE};
+
+  VkRenderingAttachmentInfo color_attachment_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+      .pNext = nullptr,
+      .imageView = pick_color_image_view,
+      .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+      .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+      // Slot 0 is the "nothing here" value the readback scan skips.
+      .clearValue = {.color = {.uint32 = {0, 0, 0, 0}}},
+  };
+
+  VkRenderingAttachmentInfo depth_attachment_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+      .pNext = nullptr,
+      .imageView = pick_depth_image_view,
+      .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+      .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+      .clearValue = {.depthStencil = {.depth = 1.0F, .stencil = 0}},
+  };
+
+  VkRenderingInfo rendering_info = {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
+      .pNext = nullptr,
+      .renderArea = {.offset = {0, 0}, .extent = pick_extent},
+      .layerCount = 1,
+      .colorAttachmentCount = 1,
+      .pColorAttachments = &color_attachment_info,
+      .pDepthAttachment = &depth_attachment_info,
+      .pStencilAttachment = HasStencilComponent(depth_stencil_format)
+                                ? &depth_attachment_info
+                                : nullptr,
+  };
+
+  vkCmdBeginRendering(command_buffer, &rendering_info);
+
+  // The same negative-height flip the main pass uses. The engine derives the
+  // pick projection assuming this convention, so the two must not drift apart.
+  VkViewport viewport = {
+      .x = 0.0F,
+      .y = static_cast<f32>(PICK_REGION_SIZE),
+      .width = static_cast<f32>(PICK_REGION_SIZE),
+      .height = -static_cast<f32>(PICK_REGION_SIZE),
+      .minDepth = 0.0F,
+      .maxDepth = 1.0F,
+  };
+  vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+  VkRect2D scissor = {.offset = {0, 0}, .extent = pick_extent};
+  vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+  vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipeline->vk_pipeline);
+
+  // No descriptor set is bound: the pick shaders read nothing from set 0, and
+  // Vulkan only requires sets a shader statically uses.
+  for (const auto &draw : draws) {
+    const auto draw_item = draw_item_registry.Get(draw.draw_item_index);
+    auto render_mesh_opt =
+        render_mesh_manager.Get(draw_item.render_mesh_handle);
+    if (!render_mesh_opt.has_value() || !render_mesh_opt.value()->ready) {
+      continue;
+    }
+    const auto &render_mesh = render_mesh_opt.value();
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(command_buffer, 0, 1,
+                           &render_mesh->vertex_streams[0].buffer, offsets);
+    vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
+                         VK_INDEX_TYPE_UINT16);
+    vkCmdPushConstants(command_buffer, pipeline_layout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
+                       &draw.mvp);
+    // firstInstance is the id channel: gl_InstanceIndex is firstInstance plus
+    // the instance number, and there is exactly one instance.
+    vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh->index_count),
+                     1, 0, 0, draw.slot);
+  }
+
+  vkCmdEndRendering(command_buffer);
+
+  VkImageMemoryBarrier readback_barrier = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+      .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = pick_color_image,
+      .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+  };
+  vkCmdPipelineBarrier(command_buffer,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &readback_barrier);
+
+  VkBufferImageCopy region = {};
+  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.imageExtent = {PICK_REGION_SIZE, PICK_REGION_SIZE, 1};
+  vkCmdCopyImageToBuffer(command_buffer, pick_color_image,
+                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         pick_readback_buffer, 1, &region);
+
+  // The copy lands when this frame's submission completes, which is what its
+  // fence signals. Registering it here rather than on the frame context is what
+  // lets the context be handed back to the update thread before the result is
+  // claimed.
+  pending_pick_fence = frame_context.GetFrameBeginReadyFence();
+
+  // No submission here: this is the frame's command buffer, so the copy lands
+  // when the frame does and ProcessReadbacks publishes the answer.
+}
+
+auto LuminaRenderer::PublishPickFromReadback() -> void {
+  const auto *pixels = static_cast<const u32 *>(pick_readback_buffer_mapped);
+  constexpr auto centre = static_cast<i32>(PICK_REGION_SIZE) / 2;
+
+  // Nearest hit to the centre wins, so a click a pixel or two off a thin object
+  // still selects it rather than whatever sits behind the exact pixel.
+  u32 best_slot = 0;
+  i32 best_distance_squared = std::numeric_limits<i32>::max();
+  for (i32 y = 0; y < static_cast<i32>(PICK_REGION_SIZE); ++y) {
+    for (i32 x = 0; x < static_cast<i32>(PICK_REGION_SIZE); ++x) {
+      const u32 slot = pixels[(y * static_cast<i32>(PICK_REGION_SIZE)) + x];
+      if (slot == 0) {
+        continue;
+      }
+      const i32 dx = x - centre;
+      const i32 dy = y - centre;
+      if (const i32 distance_squared = (dx * dx) + (dy * dy);
+          distance_squared < best_distance_squared) {
+        best_distance_squared = distance_squared;
+        best_slot = slot;
+      }
+    }
+  }
+
+  PublishPickResult(best_slot);
 }
 
 auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
@@ -2209,8 +2565,8 @@ auto LuminaRenderer::EnsureInstanceBufferCapacity(
       math::Max(capacity, static_cast<size_t>(instance_buffer.capacity) * 2UZ);
 
   // Destroying here is safe only because a frame context is handed out for
-  // update after TryReclaimFrameContexts saw its fence signalled, so the GPU has
-  // finished reading the old buffer.
+  // update after TryReclaimFrameContexts saw its fence signalled, so the GPU
+  // has finished reading the old buffer.
   vkUnmapMemory(vulkan_context.GetDevice(), instance_buffer.memory);
   vkDestroyBuffer(vulkan_context.GetDevice(), instance_buffer.buffer, nullptr);
   vkFreeMemory(vulkan_context.GetDevice(), instance_buffer.memory, nullptr);

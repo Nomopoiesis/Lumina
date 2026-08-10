@@ -30,8 +30,8 @@ namespace {
 
 } // namespace
 
-auto CullProxies(const DrawableProxyManager &proxies, const Frustum &frustum,
-                 BatchedVisibilityIndex &visibility) -> void {
+auto FrustumCulling(const DrawableProxyManager &proxies, const Frustum &frustum,
+                    BatchedVisibilityIndex &visibility) -> void {
   // Wall time, so this includes the fiber sitting parked in WaitForCounter
   // while workers chew through chunks. That is "how long the cull took", not
   // "how much CPU the cull burned" — the latter needs the per-thread breakdown.
@@ -49,13 +49,13 @@ auto CullProxies(const DrawableProxyManager &proxies, const Frustum &frustum,
 }
 
 #if 0 // NOLINT
-auto CullProxiesSerial(const DrawableProxyManager &proxies,
+auto FrustumCullingSerial(const DrawableProxyManager &proxies,
                       const Frustum &frustum,
                       BatchedVisibilityIndex &visibility) -> void {
   const auto count = proxies.ProxyCount();
   visibility.Reset(count, CullBatchSize);
 
-  // Chunked rather than one flat loop so the output matches CullProxies exactly.
+  // Chunked rather than one flat loop so the output matches FrustumCulling exactly.
   for (size_t begin = 0; begin < count; begin += CullBatchSize) {
   const size_t end = std::min(begin + CullBatchSize, count);
   const size_t written = CullChunk(proxies, frustum, begin, end, visibility);

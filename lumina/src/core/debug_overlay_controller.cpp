@@ -16,6 +16,11 @@ auto DebugOverlayController::HandleInput(
         ActionID(std::string_view("ToggleDebugOverlay"))) {
       engine.GetDebugOverlay().Toggle();
     }
+    if (action_event.action_id == ActionID(std::string_view("PickEntity"))) {
+      if (!engine.IsCursorTrapped()) {
+        engine.RequestEntityPickAt(action_event.x, action_event.y);
+      }
+    }
   }
 }
 

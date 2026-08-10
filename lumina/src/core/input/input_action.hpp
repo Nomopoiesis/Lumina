@@ -52,6 +52,7 @@ struct ActionEvent {
   ActionID action_id;
   KeyState key_state;
   f32 axis_value = 0.0F;
+  i32 x = 0, y = 0;
   bool consumed = false;
 };
 
@@ -60,10 +61,6 @@ public:
   auto BindAction(ActionID action_id, InputBinding binding) -> void;
   auto GatherActions(const InputState &input_state) -> std::vector<ActionEvent>;
 
-  [[nodiscard]] auto GetActiveBindingState(const InputBinding &binding,
-                                           const InputState &input_state) const
-      -> std::pair<bool, KeyState>;
-
 private:
   struct ActionIDHash {
     auto operator()(const ActionID &action_id) const -> std::size_t {
@@ -71,6 +68,10 @@ private:
     }
   };
   std::unordered_map<ActionID, InputBinding, ActionIDHash> action_bindings;
+
+  [[nodiscard]] auto GetActiveBindingState(const InputBinding &binding,
+                                           const InputState &input_state) const
+      -> std::pair<bool, KeyState>;
 };
 
 auto KeyInputBinding(KeyCode key_code, KeyState key_state) -> InputBinding;

@@ -36,6 +36,12 @@ auto DebugOverlay::RefreshRows(const DebugOverlayStats &stats) -> void {
             average_delta_time * 1000.0);
   AppendRow("draws {:>7}", stats.draw_calls);
 
+  if (stats.picked_entity == INVALID_ENTITY_ID) {
+    AppendRow("picked      -");
+  } else {
+    AppendRow("picked {:>6}", stats.picked_entity);
+  }
+
   // The phase total is summed from the same smoothed values the rows print, so
   // the unaccounted row is exactly what the rows above it fail to explain — a
   // gap computed from raw times would not match the digits on screen.
@@ -97,8 +103,10 @@ auto DebugOverlay::Draw(const DebugOverlayStats &stats) -> void {
     return;
   }
 
-  if (stats.total_time >= next_refresh_time) {
+  if (stats.total_time >= next_refresh_time ||
+      stats.picked_entity != last_rendered_picked_entity) {
     RefreshRows(stats);
+    last_rendered_picked_entity = stats.picked_entity;
     next_refresh_time = stats.total_time + REFRESH_INTERVAL_SECONDS;
   }
 
