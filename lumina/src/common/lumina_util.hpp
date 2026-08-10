@@ -58,6 +58,11 @@ template <typename T, std::size_t N>
   return static_cast<u64>(value);
 }
 
+[[nodiscard]] constexpr auto SafeI32ToU32(i32 value) noexcept -> u32 {
+  ASSERT(value >= 0, "Value is negative");
+  return static_cast<u32>(value);
+}
+
 [[nodiscard]] constexpr auto IsPowerOfTwo(size_t value) noexcept -> bool {
   return (value & (value - 1)) == 0;
 }

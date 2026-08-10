@@ -28,15 +28,28 @@ FetchContent_Declare(
   cppgen
   GIT_REPOSITORY https://github.com/Nomopoiesis/CppGen.git
   GIT_TAG main
-  GIT_SHALLOW TRUE)
+  GIT_SHALLOW TRUE
+  # SYSTEM marks CppGen's interface include directories external, so its headers
+  # do not report warnings against this tool's warning level.
+  SYSTEM)
 FetchContent_MakeAvailable(cppgen)
 
 add_executable(spirv_reflect_tool src/main.cpp
                                   ${spirv_reflect_SOURCE_DIR}/spirv_reflect.c)
 
-target_include_directories(
-  spirv_reflect_tool PRIVATE ${spirv_reflect_SOURCE_DIR}
-                             ${LUMINA_COMMON_INCLUDE_DIR})
+# spirv_reflect.c is vendored source we compile ourselves, so a SYSTEM include
+# directory cannot cover it - that only affects headers. Silence the file
+# outright; warnings in upstream code we do not edit are not actionable.
+set_source_files_properties(${spirv_reflect_SOURCE_DIR}/spirv_reflect.c
+                            PROPERTIES COMPILE_OPTIONS -w)
+
+target_include_directories(spirv_reflect_tool
+                           PRIVATE ${LUMINA_COMMON_INCLUDE_DIR})
+
+# SYSTEM for spirv_reflect.h, same rationale as lumina_stb in
+# third_party/CMakeLists.txt.
+target_include_directories(spirv_reflect_tool SYSTEM
+                           PRIVATE ${spirv_reflect_SOURCE_DIR})
 
 target_link_libraries(spirv_reflect_tool PRIVATE CppGen)
 

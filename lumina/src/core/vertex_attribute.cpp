@@ -24,9 +24,10 @@ auto GetElementTypeSize(ElementType element_type) noexcept -> u8 {
       return 12;
     case ElementType::Vec4:
       return 16;
-    default:
-      return 0;
   }
+  // Outside the switch rather than a default label, so that -Wswitch reports
+  // any ElementType added later instead of it silently returning 0 here.
+  return 0;
 }
 
 } // namespace lumina::core

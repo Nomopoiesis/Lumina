@@ -9,20 +9,21 @@
 
 namespace lumina::renderer {
 
-static auto ToVkPrimitiveTopology(PrimitiveTopology topology)
+inline auto ToVkPrimitiveTopology(PrimitiveTopology topology)
     -> VkPrimitiveTopology {
   switch (topology) {
     case PrimitiveTopology::TriangleList:
       return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     case PrimitiveTopology::LineList:
       return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-    default:
-      ASSERT(false, "Unsupported primitive topology");
-      return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   }
+  // See ToVkDescriptorType below: the fallback lives outside the switch so
+  // -Wswitch flags a newly added topology at compile time.
+  ASSERT(false, "Unsupported primitive topology");
+  return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 }
 
-static auto ToVkDescriptorType(DescriptorBindingType type) -> VkDescriptorType {
+inline auto ToVkDescriptorType(DescriptorBindingType type) -> VkDescriptorType {
   switch (type) {
     case DescriptorBindingType::UniformBuffer:
       return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -40,10 +41,12 @@ static auto ToVkDescriptorType(DescriptorBindingType type) -> VkDescriptorType {
       return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
     case DescriptorBindingType::StorageBuffer:
       return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    default:
-      ASSERT(false, "Unsupported binding type");
-      return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   }
+  // A `default:` here would cover every enumerator and so disable -Wswitch,
+  // turning "somebody added a binding type" from a build break into a runtime
+  // assert. Keeping the fallback after the switch preserves both.
+  ASSERT(false, "Unsupported binding type");
+  return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 }
 
 } // namespace lumina::renderer

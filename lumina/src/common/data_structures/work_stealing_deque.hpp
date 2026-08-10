@@ -4,7 +4,7 @@
 #include "lumina_util.hpp"
 
 #include <atomic>
-#include <cmath>
+#include <bit>
 #include <cstring>
 #include <vector>
 
@@ -71,7 +71,9 @@ private:
 template <typename T>
 auto WorkStealingDeque<T>::Grow() -> bool {
   auto *old_storage = storage.load(std::memory_order_relaxed);
-  size_t old_scale = std::log2(old_storage->capacity);
+  // capacity is always 1 << scale, so the scale is exactly its trailing zero
+  // count. std::log2 round-tripped through double to recover the same number.
+  auto old_scale = static_cast<size_t>(std::countr_zero(old_storage->capacity));
   if (old_scale >= MAX_CAPACITY_SCALE) {
     return false;
   }

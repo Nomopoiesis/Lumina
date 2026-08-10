@@ -2,6 +2,7 @@
 
 #include "common/data_structures/data_buffer.hpp"
 #include "common/lumina_assert.hpp"
+#include "common/lumina_util.hpp"
 #include "common/path_registry.hpp"
 
 #include "platform/platform_common/platform_services.hpp"
@@ -71,7 +72,7 @@ auto CreateFont(const std::string &name, std::span<const i32> sizes)
     range.h_oversample = 2;
     range.v_oversample = 2;
 
-    std::vector<stbrp_rect> rects(range.num_chars);
+    std::vector<stbrp_rect> rects(SafeI32ToU64(range.num_chars));
     // stbtt_PackFontRanges(&pack_context, data_buffer.Data(), 0, &range, 1);
     auto n = stbtt_PackFontRangesGatherRects(&pack_context, &font_info, &range,
                                              1, rects.data());

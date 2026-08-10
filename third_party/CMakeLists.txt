@@ -7,6 +7,8 @@ FetchContent_Declare(
   GIT_TAG 1.0.1
   GIT_SHALLOW TRUE # Download only the latest commit to save time (no full
                    # history needed)
+  SYSTEM # See the note on lumina_stb below - external headers should not report
+         # warnings against our warning level.
 )
 FetchContent_MakeAvailable(glm)
 
@@ -17,6 +19,8 @@ FetchContent_Declare(
   GIT_TAG v0.14
   GIT_SHALLOW TRUE # Download only the latest commit to save time (no full
                    # history needed)
+  SYSTEM # Covers any target clay defines. The path lumina_core actually
+         # includes clay.h through is marked SYSTEM at its own call site.
 )
 # Disable all examples to save space
 set(CLAY_INCLUDE_ALL_EXAMPLES

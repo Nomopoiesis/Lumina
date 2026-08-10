@@ -29,7 +29,7 @@ constexpr EntityID INVALID_ENTITY_ID = {
 class Entity {
 public:
   Entity() = default;
-  Entity(Mobility mobility) : mobility(mobility) {}
+  Entity(Mobility mobility_) : mobility(mobility_) {}
   Entity(const Entity &) = default;
   auto operator=(const Entity &) -> Entity & = default;
   Entity(Entity &&) noexcept = default;

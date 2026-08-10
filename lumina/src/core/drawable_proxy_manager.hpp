@@ -15,10 +15,9 @@ class BatchedVisibilityIndex {
 public:
   BatchedVisibilityIndex() noexcept = default;
   BatchedVisibilityIndex(size_t proxy_count, size_t batch_size) noexcept
-      : chunked_visibility_index(proxy_count),
+      : batch_size_{batch_size}, chunked_visibility_index(proxy_count),
         chunked_visibility_index_batch_size((proxy_count + batch_size - 1) /
-                                            batch_size),
-        batch_size_{batch_size} {}
+                                            batch_size) {}
   BatchedVisibilityIndex(const BatchedVisibilityIndex &) noexcept = delete;
   auto operator=(const BatchedVisibilityIndex &) noexcept
       -> BatchedVisibilityIndex & = delete;

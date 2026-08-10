@@ -114,10 +114,10 @@ ShaderInterface::~ShaderInterface() noexcept {
 }
 
 ShaderInterface::ShaderInterface(ShaderInterface &&other) noexcept
-    : m_device(other.m_device), name(std::move(other.name)),
+    : name(std::move(other.name)), m_device(other.m_device),
+      set_indices(std::move(other.set_indices)),
       descriptor_set_layouts(std::move(other.descriptor_set_layouts)),
       externally_owned_set_count(other.externally_owned_set_count),
-      set_indices(std::move(other.set_indices)),
       vertex_input_layout(other.vertex_input_layout),
       pipeline_layout(other.pipeline_layout) {
   other.m_device = VK_NULL_HANDLE;

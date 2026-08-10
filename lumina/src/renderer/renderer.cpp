@@ -26,7 +26,6 @@
 #include <map>
 #include <set>
 
-#define GLM_FORCE_RADIANS
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -561,7 +560,8 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
   stbi_image_free(pixels);
 
   auto format = VK_FORMAT_R8G8B8A8_SRGB;
-  if (!CreateImage(vulkan_context, texture_image, tex_width, tex_height,
+  if (!CreateImage(vulkan_context, texture_image, SafeI32ToU32(tex_width),
+                   SafeI32ToU32(tex_height),
                    texture_image_memory, format, VK_IMAGE_TILING_OPTIMAL,
                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
@@ -573,7 +573,7 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
                         VK_IMAGE_LAYOUT_UNDEFINED,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
   CopyBufferToImage(vulkan_context, command_pool, staging_buffer, texture_image,
-                    tex_width, tex_height);
+                    SafeI32ToU32(tex_width), SafeI32ToU32(tex_height));
   TransitionImageLayout(vulkan_context, command_pool, texture_image, format,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -880,7 +880,7 @@ auto LuminaRenderer::ProcessReadbacks() -> void {
 
 auto LuminaRenderer::TryReclaimFrameContexts() -> void {
   // First check fence status of all RENDER_COMPLETE frame contexts
-  auto pending_completion = 0;
+  size_t pending_completion = 0;
   for (auto &frame_context : frame_contexts) {
     if (frame_context->pipeline_state.load() ==
         FrameContextPipelineState::RENDER_COMPLETE) {
@@ -983,11 +983,11 @@ auto LuminaRenderer::PollAndExecuteCommandContexts() -> void {
 
   for (auto it = pending_submissions.begin();
        it != pending_submissions.end();) {
-    auto &[fence, cmd_ctxs] = *it;
+    auto &[fence, submitted_ctxs] = *it;
     auto status = vkGetFenceStatus(vulkan_context.GetDevice(), fence);
     if (status == VK_SUCCESS) {
       vulkan_context.DestroyFence(fence);
-      for (auto &cmd_ctx : cmd_ctxs) {
+      for (auto &cmd_ctx : submitted_ctxs) {
         cmd_ctx->RunCompletionCallbacks();
         cmd_ctx->Reset();
         ReleaseCommandContext(*cmd_ctx);
@@ -1430,10 +1430,23 @@ static auto ToVkFormat(core::ElementType element_type) -> VkFormat {
       return VK_FORMAT_R32G32B32_SFLOAT;
     case core::ElementType::Vec4:
       return VK_FORMAT_R32G32B32A32_SFLOAT;
-    default:
-      ASSERT(false, "Unsupported element type for Vulkan vertex format");
-      return VK_FORMAT_UNDEFINED;
+    // No vertex stream uses these yet. They are listed rather than folded into
+    // a `default:` so that adding an ElementType breaks this switch instead of
+    // reaching the assert below at runtime.
+    case core::ElementType::Double:
+    case core::ElementType::Int8:
+    case core::ElementType::Uint8:
+    case core::ElementType::Int16:
+    case core::ElementType::Uint16:
+    case core::ElementType::Int32:
+    case core::ElementType::Uint32:
+    case core::ElementType::Int64:
+    case core::ElementType::Uint64:
+    case core::ElementType::Bool:
+      break;
   }
+  ASSERT(false, "Unsupported element type for Vulkan vertex format");
+  return VK_FORMAT_UNDEFINED;
 }
 
 static auto ToVkBindingDescriptions(const VertexBufferLayout &layout)
@@ -1579,8 +1592,9 @@ auto LuminaRenderer::AllocatePersistentDescriptorSets(
   }
 
   material_instance_manager.Update(
-      instance_handle, [descriptor_sets](MaterialInstance &instance) -> void {
-        instance.GetDescriptorSetsMutable() = descriptor_sets;
+      instance_handle,
+      [descriptor_sets](MaterialInstance &material_instance) -> void {
+        material_instance.GetDescriptorSetsMutable() = descriptor_sets;
       });
 
   return true;
@@ -1601,11 +1615,11 @@ auto LuminaRenderer::FreePersistentDescriptorSets(
     return;
   }
 
-  auto patch = [this](MaterialInstance &instance) -> void {
+  auto patch = [this](MaterialInstance &material_instance) -> void {
     vkFreeDescriptorSets(vulkan_context.GetDevice(), persistent_descriptor_pool,
                          static_cast<u32>(MAX_FRAMES_IN_FLIGHT),
-                         instance.GetDescriptorSets().data());
-    instance.ResetDescriptorSets();
+                         material_instance.GetDescriptorSets().data());
+    material_instance.ResetDescriptorSets();
   };
   material_instance_manager.Update(instance_handle, patch);
 }
@@ -2358,16 +2372,17 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
   auto render_mesh_handle = render_mesh_manager.Create(std::move(render_mesh));
   cmd_ctx.AddCompletionCallback(
       [staging = std::move(staging_resources), render_mesh_handle,
-       render_mesh_manager =
-           &this->render_mesh_manager](CommandContext *cmd_ctx) -> void {
-        for (const auto &staging_buffer : staging) {
-          vkDestroyBuffer(cmd_ctx->vulkan_context->GetDevice(),
-                          staging_buffer.buffer, nullptr);
-          vkFreeMemory(cmd_ctx->vulkan_context->GetDevice(),
-                       staging_buffer.memory, nullptr);
+       mesh_manager = &this->render_mesh_manager](CommandContext *ctx) -> void {
+        for (const auto &staging_resource : staging) {
+          vkDestroyBuffer(ctx->vulkan_context->GetDevice(),
+                          staging_resource.buffer, nullptr);
+          vkFreeMemory(ctx->vulkan_context->GetDevice(),
+                       staging_resource.memory, nullptr);
         }
-        auto patch = [](RenderMesh &mesh) -> void { mesh.ready = true; };
-        render_mesh_manager->Update(render_mesh_handle, patch);
+        auto patch = [](RenderMesh &patched_mesh) -> void {
+          patched_mesh.ready = true;
+        };
+        mesh_manager->Update(render_mesh_handle, patch);
       });
   cmd_ctx.End();
   SubmitCommandContext(cmd_ctx);
@@ -2375,23 +2390,22 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
 }
 
 auto LuminaRenderer::DestroyRenderMesh(RenderMeshHandle handle) -> void {
-  auto on_destroy =
-      [vulkan_context = &this->vulkan_context](RenderMeshHandle handle,
-                                               const RenderMesh &mesh) -> void {
+  auto on_destroy = [context = &this->vulkan_context](
+                        RenderMeshHandle /*handle*/,
+                        const RenderMesh &mesh) -> void {
     for (const auto &stream : mesh.vertex_streams) {
       if (stream.buffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(vulkan_context->GetDevice(), stream.buffer, nullptr);
+        vkDestroyBuffer(context->GetDevice(), stream.buffer, nullptr);
       }
       if (stream.memory != VK_NULL_HANDLE) {
-        vkFreeMemory(vulkan_context->GetDevice(), stream.memory, nullptr);
+        vkFreeMemory(context->GetDevice(), stream.memory, nullptr);
       }
     }
     if (mesh.index_buffer != VK_NULL_HANDLE) {
-      vkDestroyBuffer(vulkan_context->GetDevice(), mesh.index_buffer, nullptr);
+      vkDestroyBuffer(context->GetDevice(), mesh.index_buffer, nullptr);
     }
     if (mesh.index_buffer_memory != VK_NULL_HANDLE) {
-      vkFreeMemory(vulkan_context->GetDevice(), mesh.index_buffer_memory,
-                   nullptr);
+      vkFreeMemory(context->GetDevice(), mesh.index_buffer_memory, nullptr);
     }
   };
   render_mesh_manager.Destroy(handle, on_destroy);
@@ -2507,13 +2521,13 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
   auto handle = render_texture_manager.Create(std::move(render_texture));
   cmd_ctx.AddCompletionCallback(
       [staging_buffer, staging_buffer_memory, handle, is_font_atlas,
-       render_texture_manager = &this->render_texture_manager, renderer = this,
+       texture_manager = &this->render_texture_manager, renderer = this,
        rt_image_view, rt_sampler](CommandContext *ctx) -> void {
         vkDestroyBuffer(ctx->vulkan_context->GetDevice(), staging_buffer,
                         nullptr);
         vkFreeMemory(ctx->vulkan_context->GetDevice(), staging_buffer_memory,
                      nullptr);
-        render_texture_manager->Update(
+        texture_manager->Update(
             handle, [](RenderTexture &rt) -> void { rt.ready = true; });
         UpdateLitMaterialTextures(renderer, rt_sampler, rt_image_view);
         if (is_font_atlas) {
@@ -2527,20 +2541,19 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
 
 auto LuminaRenderer::DestroyRenderTexture(RenderTextureHandle handle) -> void {
   render_texture_manager.Destroy(
-      handle, [vulkan_context = &this->vulkan_context](
+      handle, [context = &this->vulkan_context](
                   RenderTextureHandle /*handle*/, const RenderTexture &rt) {
         if (rt.sampler != VK_NULL_HANDLE) {
-          vkDestroySampler(vulkan_context->GetDevice(), rt.sampler, nullptr);
+          vkDestroySampler(context->GetDevice(), rt.sampler, nullptr);
         }
         if (rt.image_view != VK_NULL_HANDLE) {
-          vkDestroyImageView(vulkan_context->GetDevice(), rt.image_view,
-                             nullptr);
+          vkDestroyImageView(context->GetDevice(), rt.image_view, nullptr);
         }
         if (rt.image != VK_NULL_HANDLE) {
-          vkDestroyImage(vulkan_context->GetDevice(), rt.image, nullptr);
+          vkDestroyImage(context->GetDevice(), rt.image, nullptr);
         }
         if (rt.memory != VK_NULL_HANDLE) {
-          vkFreeMemory(vulkan_context->GetDevice(), rt.memory, nullptr);
+          vkFreeMemory(context->GetDevice(), rt.memory, nullptr);
         }
       });
 }

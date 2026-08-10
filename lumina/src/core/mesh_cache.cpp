@@ -139,7 +139,7 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
     write(&attr_type, sizeof(attr_type));
     write(&elem_type, sizeof(elem_type));
     write(&byte_count, sizeof(byte_count));
-    write(data.Data(), static_cast<std::streamsize>(byte_count));
+    write(data.Data(), byte_count);
   }
 
   // AABB is stored explicitly so loaders don't need to scan vertex positions.
@@ -148,8 +148,7 @@ auto SerializeStaticMesh(const StaticMesh &mesh, std::string_view cache_key,
   write(&mesh.bounding_box.min, sizeof(mesh.bounding_box.min));
   write(&mesh.bounding_box.max, sizeof(mesh.bounding_box.max));
 
-  write(mesh.indices.data(),
-        static_cast<std::streamsize>(mesh.indices.size() * sizeof(u16)));
+  write(mesh.indices.data(), mesh.indices.size() * sizeof(u16));
 
   auto write_success =
       platform::common::PlatformServices::Instance().LuminaWriteFile(

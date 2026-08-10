@@ -163,9 +163,9 @@ IsDeviceSuitable(VkPhysicalDevice device,
          swap_chain_adequate && features_supported;
 }
 
-VulkanContext::VulkanContext(LuminaRenderer *renderer, VkInstance instance_,
+VulkanContext::VulkanContext(LuminaRenderer *renderer_, VkInstance instance_,
                              VkSurfaceKHR surface_) noexcept
-    : renderer(renderer), instance(instance_), surface(surface_),
+    : renderer(renderer_), instance(instance_), surface(surface_),
       swap_chain_image_format(VK_FORMAT_UNDEFINED),
       swap_chain_image_extent({}) {
   required_extensions = {
@@ -176,6 +176,7 @@ VulkanContext::VulkanContext(LuminaRenderer *renderer, VkInstance instance_,
 
 VulkanContext::VulkanContext(VulkanContext &&other) noexcept
     : renderer(other.renderer), is_initialized(other.is_initialized),
+      required_extensions(std::move(other.required_extensions)),
       instance(other.instance), surface(other.surface),
       physical_device(other.physical_device), device(other.device),
       graphics_queue(other.graphics_queue), present_queue(other.present_queue),
@@ -185,8 +186,7 @@ VulkanContext::VulkanContext(VulkanContext &&other) noexcept
       swap_chain_image_extent(other.swap_chain_image_extent),
       image_views(std::move(other.image_views)),
       swap_chain_image_ready_to_present_semaphores(
-          std::move(other.swap_chain_image_ready_to_present_semaphores)),
-      required_extensions(std::move(other.required_extensions)) {
+          std::move(other.swap_chain_image_ready_to_present_semaphores)) {
   other.renderer = nullptr;
   other.instance = VK_NULL_HANDLE;
   other.surface = VK_NULL_HANDLE;
@@ -465,14 +465,14 @@ auto VulkanContext::SelectPhysicalDevice() noexcept
 
   std::multimap<u32, std::pair<VkPhysicalDevice, VkPhysicalDeviceProperties>>
       candidate_devices;
-  for (const auto &device : devices) {
+  for (const auto &candidate : devices) {
     VkPhysicalDeviceProperties device_properties;
-    vkGetPhysicalDeviceProperties(device, &device_properties);
+    vkGetPhysicalDeviceProperties(candidate, &device_properties);
     // first check if the device meets the minimum requirements
-    if (IsDeviceSuitable(device, device_properties, surface,
+    if (IsDeviceSuitable(candidate, device_properties, surface,
                          required_extensions)) {
       auto device_score = CalculateDeviceScore(device_properties);
-      candidate_devices.insert({device_score, {device, device_properties}});
+      candidate_devices.insert({device_score, {candidate, device_properties}});
     }
   }
 

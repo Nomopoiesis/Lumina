@@ -6,6 +6,28 @@
 
 namespace lumina::platform::common::vulkan {
 
+namespace {
+
+// vkGetInstanceProcAddr returns PFN_vkVoidFunction and the Vulkan spec requires
+// the caller to cast it to the concrete entry point type. That is a genuine
+// function-type mismatch as far as the compiler is concerned, so
+// -Wcast-function-type-strict fires on it and there is nothing to fix. Funnel
+// every extension lookup through here so the suppression lives in one place
+// instead of at each call site.
+template <typename Fn>
+auto LoadInstanceFunction(VkInstance instance, const char *name) -> Fn {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-strict"
+#endif
+  return reinterpret_cast<Fn>(vkGetInstanceProcAddr(instance, name));
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+}
+
+} // namespace
+
 auto VulkanDebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -50,8 +72,8 @@ auto CreateVulkanDebugMessenger(VkInstance instance) noexcept
   };
 
   auto Instace_vkCreateDebugUtilsMessengerEXT =
-      reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+      LoadInstanceFunction<PFN_vkCreateDebugUtilsMessengerEXT>(
+          instance, "vkCreateDebugUtilsMessengerEXT");
   if (Instace_vkCreateDebugUtilsMessengerEXT == nullptr) {
     return std::unexpected(VkDebugMessengerCreationError{
         .message = "Failed to get vkCreateDebugUtilsMessengerEXT function"});
@@ -75,8 +97,8 @@ auto DestroyVulkanDebugMessenger(
     return;
   }
   auto Instace_vkDestroyDebugUtilsMessengerEXT =
-      reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-          vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+      LoadInstanceFunction<PFN_vkDestroyDebugUtilsMessengerEXT>(
+          instance, "vkDestroyDebugUtilsMessengerEXT");
   if (Instace_vkDestroyDebugUtilsMessengerEXT == nullptr) {
     return;
   }

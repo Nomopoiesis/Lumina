@@ -176,7 +176,7 @@ auto JobManager::WorkerLoop(WorkerContext *ctx) -> void {
   }
 }
 
-auto JobManager::FiberEntryPoint(void *data) -> void {
+[[noreturn]] auto JobManager::FiberEntryPoint(void *data) -> void {
   ASSERT(data != nullptr, "Fiber data is null");
   auto *fiber_context = static_cast<FiberContext *>(data);
 

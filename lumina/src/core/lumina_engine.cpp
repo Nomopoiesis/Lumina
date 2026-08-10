@@ -411,12 +411,13 @@ BuildDebugAABBDrawList(const DrawableProxyManager &proxies,
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   auto &instance = GetStaticInstance();
 
-  auto font = CreateFont("NaturalMono-Regular.ttf", std::span<const i32>({24}));
-  if (!font.has_value()) {
+  auto default_font =
+      CreateFont("NaturalMono-Regular.ttf", std::span<const i32>({24}));
+  if (!default_font.has_value()) {
     LOG_CRITICAL("Failed to create font: NaturalMono-Regular");
     LUMINA_TERMINATE();
   }
-  instance.fonts["NaturalMono-Regular"] = std::move(font.value());
+  instance.fonts["NaturalMono-Regular"] = std::move(default_font.value());
 
   instance.window_dimensions = init_info.window_dimensions;
   instance.renderer =
@@ -785,7 +786,9 @@ auto LuminaEngine::ExecuteFrame() -> void {
           dispatched_mesh_uploads.insert(static_mesh_handle.index);
           static_mesh_manager.GetRegistry().Update(
               static_mesh_handle,
-              [](StaticMesh &mesh) -> void { mesh.render_active = true; });
+              [](StaticMesh &static_mesh) -> void {
+                static_mesh.render_active = true;
+              });
           auto *job = job_system::GetJobManager().AcquireJob();
           job->execute = [static_mesh_handle](void *data) -> void {
             auto *engine = static_cast<LuminaEngine *>(data);
@@ -796,8 +799,8 @@ auto LuminaEngine::ExecuteFrame() -> void {
                 *m, engine->GetRenderer().GetDefaultMaterialTemplateHandle());
             engine->static_mesh_manager.GetRegistry().Update(
                 static_mesh_handle,
-                [render_mesh_handle](StaticMesh &mesh) -> void {
-                  mesh.render_mesh_handle = render_mesh_handle;
+                [render_mesh_handle](StaticMesh &static_mesh) -> void {
+                  static_mesh.render_mesh_handle = render_mesh_handle;
                 });
           };
           job->data = this;

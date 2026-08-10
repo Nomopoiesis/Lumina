@@ -5,13 +5,19 @@
 // Debug assertion
 #ifndef NDEBUG
 #define ASSERT(Expression, ...)                                                \
-  if (!(Expression)) {                                                         \
-    DBG_PRINT(__VA_ARGS__);                                                    \
-    volatile int *crash = nullptr;                                             \
-    *crash = 0;                                                                \
-  }
+  do {                                                                         \
+    if (!(Expression)) {                                                       \
+      DBG_PRINT(__VA_ARGS__);                                                  \
+      volatile int *crash = nullptr;                                           \
+      *crash = 0;                                                              \
+    }                                                                          \
+  } while (0)
 #else
-#define ASSERT(Expression, ...) ((void)0)
+// sizeof leaves Expression unevaluated - no code is generated - while still
+// counting as a use of whatever it names. Without that, every variable read
+// only by an ASSERT becomes unused as soon as NDEBUG is defined, and Release
+// fills up with -Wunused-variable on code that is correct.
+#define ASSERT(Expression, ...) ((void)sizeof((Expression)))
 #endif
 
 // Debug break

@@ -77,7 +77,6 @@ private:
 auto KeyInputBinding(KeyCode key_code, KeyState key_state) -> InputBinding;
 auto MouseButtonInputBinding(MouseButton mouse_button, KeyState key_state)
     -> InputBinding;
-// auto MouseAxisInputBinding(MouseAxis mouse_axis, KeyState key_state) ->
-// InputBinding;
+auto MouseAxisInputBinding(MouseAxis mouse_axis) -> InputBinding;
 
 } // namespace lumina::core

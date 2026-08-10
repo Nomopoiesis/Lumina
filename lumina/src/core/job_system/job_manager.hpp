@@ -162,7 +162,9 @@ private:
       -> void;
 
   static auto WorkerEntryPoint(WorkerContext *worker_context) -> void;
-  static auto FiberEntryPoint(void *data) -> void;
+  // Never returns: the fiber loops running jobs and yielding back to its
+  // master, and is torn down by the pool rather than by falling off the end.
+  [[noreturn]] static auto FiberEntryPoint(void *data) -> void;
   static auto WorkerLoop(WorkerContext *ctx) -> void;
   static auto YieldToMaster(FiberContext *fiber_context) -> void;
 

@@ -9,6 +9,9 @@
 
 namespace lumina::platform::common::vulkan {
 
+// Guarded to match its only call site below: validation layers are requested
+// only in debug builds, so in Release this would be a defined-but-unused static.
+#ifndef NDEBUG
 static auto
 CheckValidationLayerSupport(const std::vector<const char *> &validation_layers)
     -> bool {
@@ -30,6 +33,7 @@ CheckValidationLayerSupport(const std::vector<const char *> &validation_layers)
   }
   return true;
 }
+#endif
 
 auto CreateVulkanInstance(VulkanInstanceCreateInfo &create_info)
     -> std::expected<VkInstance, VkInstanceCreationError> {

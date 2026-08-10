@@ -61,7 +61,7 @@ auto TransformToCenterExtent(const AABoudingBox &aabb,
   auto aabbce = ToCenterExtent(aabb);
   math::Vec3 extent(0.0F);
   math::Vec3 center(0.0F);
-  for (int i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < 3; ++i) {
     f32 axis_x = math::Abs(transform[0][i]);
     f32 axis_y = math::Abs(transform[1][i]);
     f32 axis_z = math::Abs(transform[2][i]);

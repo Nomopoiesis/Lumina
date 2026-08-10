@@ -1,5 +1,7 @@
 #include "draw_item_registry.hpp"
 
+#include "common/lumina_util.hpp"
+
 namespace lumina::renderer {
 
 auto DrawItemRegistry::AcquireDrawItem(
@@ -20,9 +22,10 @@ auto DrawItemRegistry::AcquireDrawItem(
       DrawItem{.pipeline_handle = pipeline_handle,
                .material_instance_handle = material_instance_handle,
                .render_mesh_handle = render_mesh_handle};
-  lookup_table[key] = draw_items.size();
+  const auto item_index = SafeU64ToU32(draw_items.size());
+  lookup_table[key] = item_index;
   draw_items.push_back(draw_item);
-  return draw_items.size() - 1;
+  return item_index;
 }
 
 } // namespace lumina::renderer

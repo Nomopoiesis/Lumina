@@ -1,7 +1,8 @@
 #include "platform/platform_common/runtime_root.hpp"
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+// WIN32_LEAN_AND_MEAN and NOMINMAX come from the windows_lumina target in
+// lumina/src/platform/windows/CMakeLists.txt.
+#include <Windows.h>
 
 #include <filesystem>
 

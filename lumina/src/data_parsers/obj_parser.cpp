@@ -174,8 +174,7 @@ auto ParseOBJ(const DataBufferView &data) -> OBJ_Result {
   ParseContext parse_context;
   while (text < end) {
     const auto *line_end = std::find(text, end, '\n');
-    const auto line_length = line_end - text;
-    const auto line = std::string_view(text, line_length);
+    const auto line = std::string_view(text, line_end);
     ParseLine(line, parse_context);
     text = line_end + 1;
   }
