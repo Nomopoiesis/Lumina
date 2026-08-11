@@ -9,6 +9,17 @@
 
 namespace lumina::platform::common {
 
+// What a single filesystem query about an existing file yields. Both platforms
+// return these two facts from one call — GetFileAttributesEx on Windows, stat
+// on Linux — so a caller that needs both should ask for them together rather
+// than issuing two queries that can disagree with each other.
+struct FileMetadata {
+  // Last modification time, in nanoseconds since the Unix epoch. See
+  // LuminaGetFileWriteTime for why implementations must rebase onto that unit.
+  u64 write_time_ns = 0;
+  u64 size_bytes = 0;
+};
+
 // Platform-agnostic interface for platform-specific I/O operations
 // Platform-specific implementations (e.g., Windows) will provide concrete
 // function implementations for these operations
@@ -43,6 +54,7 @@ public:
       void (*close_file)(FileHandle handle),
       bool (*delete_file)(const char *path),
       bool (*get_file_write_time)(const char *path, u64 *write_time_ns),
+      bool (*get_file_metadata)(const char *path, FileMetadata *metadata),
       FileHandle (*create_console)(),
       void (*write_console)(FileHandle handle, const char *text,
                             std::size_t length),
@@ -68,6 +80,7 @@ public:
     instance.LuminaCloseFile = close_file;
     instance.LuminaDeleteFile = delete_file;
     instance.LuminaGetFileWriteTime = get_file_write_time;
+    instance.LuminaGetFileMetadata = get_file_metadata;
     instance.LuminaCreateConsole = create_console;
     instance.LuminaWriteConsole = write_console;
     instance.LuminaWaitConsoleKeypress = wait_console_keypress;
@@ -126,6 +139,15 @@ public:
   // write_time_ns untouched.
   bool (*LuminaGetFileWriteTime)(const char *path,
                                  u64 *write_time_ns) = nullptr;
+
+  // Writes everything one filesystem query can say about an existing file to
+  // metadata. For a caller that wants more than the timestamp this is a single
+  // query rather than several, so the fields it returns describe the same
+  // observation of the file rather than separate ones taken moments apart.
+  // Returns false if the file does not exist or cannot be queried, leaving
+  // metadata untouched.
+  bool (*LuminaGetFileMetadata)(const char *path,
+                                FileMetadata *metadata) = nullptr;
 
   // Console operations
   // Creates/attaches to a console and returns a platform-specific handle

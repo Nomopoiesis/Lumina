@@ -17,6 +17,7 @@ namespace lumina::platform::windows {
 namespace {
 
 using lumina::platform::common::FileHandle;
+using lumina::platform::common::FileMetadata;
 using lumina::platform::common::InvalidFileHandle;
 
 // A Windows HANDLE is a pointer, so it round-trips through the platform-
@@ -137,8 +138,8 @@ auto WinDeleteFile(const char *path) -> bool {
   return DeleteFileA(path) != FALSE;
 }
 
-auto WinGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
-  if (path == nullptr || write_time_ns == nullptr) {
+auto WinGetFileMetadata(const char *path, FileMetadata *metadata) -> bool {
+  if (path == nullptr || metadata == nullptr) {
     return false;
   }
 
@@ -153,17 +154,37 @@ auto WinGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
   ticks.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
   ticks.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
 
+  ULARGE_INTEGER size;
+  size.LowPart = attributes.nFileSizeLow;
+  size.HighPart = attributes.nFileSizeHigh;
+
   // FILETIME counts 100ns ticks from 1601-01-01. Rebase onto the Unix epoch;
   // anything older than that saturates rather than wrapping the unsigned
   // subtraction.
   constexpr u64 TicksToUnixEpoch = 116444736000000000ULL;
   constexpr u64 NanosecondsPerTick = 100ULL;
-  if (ticks.QuadPart < TicksToUnixEpoch) {
-    *write_time_ns = 0;
-    return true;
+  const u64 write_time_ns =
+      ticks.QuadPart < TicksToUnixEpoch
+          ? 0
+          : (ticks.QuadPart - TicksToUnixEpoch) * NanosecondsPerTick;
+
+  *metadata = FileMetadata{.write_time_ns = write_time_ns,
+                           .size_bytes = size.QuadPart};
+  return true;
+}
+
+// Delegates rather than repeating the query and the epoch arithmetic above.
+auto WinGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
+  if (write_time_ns == nullptr) {
+    return false;
   }
 
-  *write_time_ns = (ticks.QuadPart - TicksToUnixEpoch) * NanosecondsPerTick;
+  FileMetadata metadata;
+  if (!WinGetFileMetadata(path, &metadata)) {
+    return false;
+  }
+
+  *write_time_ns = metadata.write_time_ns;
   return true;
 }
 
@@ -329,7 +350,7 @@ auto InitPlatformServices() -> void {
   lumina::platform::common::PlatformServices::Initialize(
       WinCreateFile, WinCreateDirectory, WinOpenFile, WinGetFileSize,
       WinWriteFile, WinReadFile, WinCloseFile, WinDeleteFile,
-      WinGetFileWriteTime, WinCreateConsole, WinWriteConsole,
+      WinGetFileWriteTime, WinGetFileMetadata, WinCreateConsole, WinWriteConsole,
       WinWaitConsoleKeypress, WinSetThreadName, WinPinThread,
       WinCreateFiber, WinConvertThreadToFiber, WinSwitchToFiber,
       WinDestroyFiber, WinSetFiberSelf, WinGetFiberSelf, WinSetCursorPosition,

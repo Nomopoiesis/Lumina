@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 
+#include "common/file_watcher/file_watcher.hpp"
 #include "common/logger/logger.hpp"
 #include "common/lumina_terminate.hpp"
 #include "common/profiling/profiler.hpp"
@@ -11,6 +12,7 @@
 #include "debug_overlay_controller.hpp"
 #include "frame_stats.hpp"
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
+
 
 #include "camera_movement_controller.hpp"
 #include "drawable_proxy_manager.hpp"
@@ -200,6 +202,8 @@ private:
   FrameTimeInfo frame_time_info{};
   FrameStats frame_stats{};
   DebugOverlay debug_overlay{};
+
+  common::FileWatcher file_watcher;
 
   // Last frame's zone snapshot, plus an exponential moving average per zone.
   // Raw per-frame zone times swing too much to read at the overlay's refresh

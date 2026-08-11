@@ -1,6 +1,7 @@
 #include "lumina_engine.hpp"
 
 #include <array>
+#include <filesystem>
 #include <span>
 #include <unordered_set>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "common/fast_random.hpp"
 #include "common/logger/logger.hpp"
 #include "common/lumina_check.hpp"
+#include "common/path_registry.hpp"
 #include "components/camera.hpp"
 #include "components/light_component.hpp"
 #include "components/static_mesh_component.hpp"
@@ -408,6 +410,53 @@ BuildDebugAABBDrawList(const DrawableProxyManager &proxies,
   });
 }
 
+// One shader examined every 50ms, so the eight compiled shaders are swept in
+// about 400ms — that is how long a change can sit unnoticed. Once one is
+// spotted it is re-examined every slice, and handed over after it has held
+// still for the settle window, so the message follows the change by roughly
+// that window rather than by another sweep.
+static constexpr common::FileWatcher::Config SHADER_WATCH_CONFIG{
+    .slice_interval_ms = 50,
+    .files_per_slice = 1,
+    .settle_ms = 150,
+};
+
+// One watcher per compiled shader in the runtime shader directory. Enumerated
+// rather than listed by name, because the set of .spv files is whatever
+// compile_shaders.py emitted — a list spelled out here would go stale the first
+// time a shader is added. The compiled output is the thing watched rather than
+// its source: that is the file the renderer actually loads, so a change to it
+// means the compile has already landed.
+static auto RegisterShaderWatchers(common::FileWatcher &watcher) -> void {
+  const auto &shader_root = common::PathRegistry::Instance().shaders.Root();
+
+  // The error_code overload: an unreadable shader directory should cost
+  // hot-reload, not the run.
+  std::error_code list_error;
+  const std::filesystem::directory_iterator entries(shader_root, list_error);
+  if (list_error) {
+    LOG_WARNING("Shader watching disabled, cannot list '{}': {}",
+                shader_root.string(), list_error.message());
+    return;
+  }
+
+  for (const auto &entry : entries) {
+    if (entry.path().extension() != ".spv") {
+      continue;
+    }
+    watcher.Watch(entry.path().string(),
+                  [](const std::string &changed_path) -> bool {
+                    LOG_DEBUG("Shader file change detected: {}", changed_path);
+                    // Nothing reads the file yet, so there is nothing to
+                    // reject.
+                    return true;
+                  });
+  }
+
+  LOG_INFO("Watching {} compiled shader(s) for changes",
+           watcher.WatchedCount());
+}
+
 auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
   auto &instance = GetStaticInstance();
 
@@ -551,6 +600,10 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
                                 math::Vec3{0.0F, 0.0F, 0.0F},
                                 math::Vec3{1.0F, 1.0F, 1.0F});
 
+  // Reports changes only — nothing rebuilds a pipeline off the back of one yet.
+  instance.file_watcher = common::FileWatcher(SHADER_WATCH_CONFIG);
+  RegisterShaderWatchers(instance.file_watcher);
+
   instance.ProcessDeferredOperations();
   instance.is_initialized = true;
 }
@@ -583,6 +636,10 @@ auto LuminaEngine::BeginFrame(Timer &timer) -> void {
   frame_time_info.total_time += delta_time;
   frame_stats.Update(delta_time);
   input_dispatcher.Dispatch(input_state);
+
+  // Advances at most one slice, and only when the slice interval has elapsed,
+  // so most frames this returns without touching the filesystem.
+  file_watcher.PollAll();
 }
 
 auto LuminaEngine::ProcessDeferredOperations() -> void {

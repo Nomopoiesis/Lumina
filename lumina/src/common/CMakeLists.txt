@@ -66,3 +66,5 @@ target_include_directories(
 
 target_link_libraries(lumina_logger PRIVATE lumina_common
                                             lumina_platform_common)
+
+add_subdirectory(file_watcher)

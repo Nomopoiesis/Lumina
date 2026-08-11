@@ -22,6 +22,7 @@ namespace lumina::platform::llinux {
 namespace {
 
 using lumina::platform::common::FileHandle;
+using lumina::platform::common::FileMetadata;
 using lumina::platform::common::InvalidFileHandle;
 
 // Linux-specific implementation functions
@@ -127,8 +128,8 @@ auto LinuxDeleteFile(const char *path) -> bool {
   return unlink(path) == 0;
 }
 
-auto LinuxGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
-  if (path == nullptr || write_time_ns == nullptr) {
+auto LinuxGetFileMetadata(const char *path, FileMetadata *metadata) -> bool {
+  if (path == nullptr || metadata == nullptr) {
     return false;
   }
 
@@ -139,9 +140,27 @@ auto LinuxGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
 
   // st_mtim is already Unix-epoch based, so it only needs flattening to ns.
   constexpr u64 NanosecondsPerSecond = 1000000000ULL;
-  *write_time_ns =
-      (static_cast<u64>(st.st_mtim.tv_sec) * NanosecondsPerSecond) +
-      static_cast<u64>(st.st_mtim.tv_nsec);
+  *metadata = FileMetadata{
+      .write_time_ns =
+          (static_cast<u64>(st.st_mtim.tv_sec) * NanosecondsPerSecond) +
+          static_cast<u64>(st.st_mtim.tv_nsec),
+      .size_bytes = static_cast<u64>(st.st_size),
+  };
+  return true;
+}
+
+// Delegates rather than repeating the stat and the epoch arithmetic above.
+auto LinuxGetFileWriteTime(const char *path, u64 *write_time_ns) -> bool {
+  if (write_time_ns == nullptr) {
+    return false;
+  }
+
+  FileMetadata metadata;
+  if (!LinuxGetFileMetadata(path, &metadata)) {
+    return false;
+  }
+
+  *write_time_ns = metadata.write_time_ns;
   return true;
 }
 
@@ -467,7 +486,8 @@ auto InitPlatformServices() -> void {
   lumina::platform::common::PlatformServices::Initialize(
       LinuxCreateFile, LinuxCreateDirectory, LinuxOpenFile, LinuxGetFileSize,
       LinuxWriteFile, LinuxReadFile, LinuxCloseFile, LinuxDeleteFile,
-      LinuxGetFileWriteTime, LinuxCreateConsole, LinuxWriteConsole,
+      LinuxGetFileWriteTime, LinuxGetFileMetadata, LinuxCreateConsole,
+      LinuxWriteConsole,
       LinuxWaitConsoleKeypress,
       LinuxSetThreadName, LinuxPinThread, LinuxCreateFiber,
       LinuxConvertThreadToFiber, LinuxSwitchToFiber, LinuxDestroyFiber,
