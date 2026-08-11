@@ -14,6 +14,7 @@ target_sources(
             lumina_check.hpp
             lumina_types.hpp
             lumina_util.hpp
+            lumina_error.hpp
             scope_guard.hpp
             logger/log_levels.hpp
             logger/log_target.hpp

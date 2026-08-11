@@ -34,8 +34,9 @@ namespace lumina::renderer {
 // forgiving on thin geometry and costs nothing measurable at this size.
 //
 // Defined here rather than engine-side because both ends must agree — the
-// renderer sizes the target with it and the engine derives the pick projection's
-// zoom from it. Two constants that had to match would eventually stop matching.
+// renderer sizes the target with it and the engine derives the pick
+// projection's zoom from it. Two constants that had to match would eventually
+// stop matching.
 inline constexpr u32 PICK_REGION_SIZE = 9;
 
 using GraphicsPipelineManager = core::ResourceRegistry<GraphicsPipeline>;
@@ -138,9 +139,6 @@ public:
   auto EnsureInstanceBufferCapacity(FrameContextInstanceBuffer &instance_buffer,
                                     size_t capacity) -> void;
 
-  auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
-      -> GraphicsPipelineHandle;
-
   auto CreateRenderMesh(const core::StaticMesh &mesh,
                         MaterialTemplateHandle material_template)
       -> RenderMeshHandle;
@@ -230,8 +228,8 @@ public:
 
 private:
   // Sequence and slot move together so a reader can never pair a fresh sequence
-  // with a stale slot. Only one pick is ever in flight, so the read-modify-write
-  // of the sequence has no competing writer.
+  // with a stale slot. Only one pick is ever in flight, so the
+  // read-modify-write of the sequence has no competing writer.
   auto PublishPickResult(u32 slot) -> void {
     const u64 previous = pick_result.load(std::memory_order_relaxed);
     const u32 next_sequence = static_cast<u32>(previous >> 32U) + 1U;
@@ -295,6 +293,9 @@ private:
 
   auto CreateDescriptorPools() -> std::expected<void, VkInitializationError>;
 
+  auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
+      -> std::expected<GraphicsPipelineHandle, common::LuminaError>;
+
   size_t current_frame_index = 0;
 
   bool is_framebuffer_resized = false;
@@ -305,6 +306,7 @@ private:
 
   std::thread render_thread;
 
+  // TODO: this is ugly, make it proper
   std::unordered_map<std::string, size_t> shader_interface_name_map;
   std::vector<ShaderInterface> shader_interfaces;
 

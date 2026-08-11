@@ -13,6 +13,7 @@ target_sources(
           frame_context.cpp
           command_context.cpp
           vertex_layout.cpp
+          graphics_pipeline.cpp
           material_instance.cpp
           material_template.cpp
           vertex_serializer.cpp

@@ -14,10 +14,10 @@
 #include "math/basic.hpp"
 #include "shaders/shader_gen/static_shader_api.hpp"
 #include "shaders/shader_module_cache.hpp"
-#include "shaders/shader_vk_helpers.hpp"
 #include "vertex_layout.hpp"
 #include "vertex_serializer.hpp"
 #include "vk_check.hpp"
+#include "vk_helpers.hpp"
 
 #include <vulkan/vk_enum_string_helper.h>
 
@@ -175,11 +175,6 @@ static auto CopyBufferToImage(VulkanContext &vulkan_context,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
   return EndCommandBuffer(vulkan_context, command_pool, command_buffer);
-}
-
-static auto HasStencilComponent(VkFormat format) -> bool {
-  return format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-         format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
 
 static auto TransitionImageLayout(VulkanContext &vulkan_context,
@@ -561,8 +556,8 @@ static auto CreateTextureImage(VulkanContext &vulkan_context,
 
   auto format = VK_FORMAT_R8G8B8A8_SRGB;
   if (!CreateImage(vulkan_context, texture_image, SafeI32ToU32(tex_width),
-                   SafeI32ToU32(tex_height),
-                   texture_image_memory, format, VK_IMAGE_TILING_OPTIMAL,
+                   SafeI32ToU32(tex_height), texture_image_memory, format,
+                   VK_IMAGE_TILING_OPTIMAL,
                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
     LOG_ERROR("Failed to create texture image");
@@ -1166,8 +1161,15 @@ auto LuminaRenderer::Initialize() -> void {
                      .type = core::VertexAttributeType::TexCoord,
                      .element_type = core::ElementType::Vec2}})),
         .material_template = mat_opt.value()->GetTemplateHandle(),
-        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()}};
-    default_pipeline_handle = CreateGraphicsPipeline(pipeline_desc);
+        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()},
+        .depth_stencil_attachment_format = depth_stencil_format};
+    auto default_pipeline_handle_result = CreateGraphicsPipeline(pipeline_desc);
+    if (!default_pipeline_handle_result) {
+      LOG_CRITICAL("Failed to create default pipeline: {}",
+                   default_pipeline_handle_result.error().Message());
+      LUMINA_TERMINATE();
+    }
+    default_pipeline_handle = default_pipeline_handle_result.value();
     ProcessDeferredOperations();
   }
 
@@ -1179,8 +1181,16 @@ auto LuminaRenderer::Initialize() -> void {
                 .element_type = core::ElementType::Vec3}})),
         .material_template = debug_wireframe_material_template_handle,
         .topology = PrimitiveTopology::LineList,
-        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()}};
-    debug_aabb_pipeline_handle = CreateGraphicsPipeline(pipeline_desc);
+        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()},
+        .depth_stencil_attachment_format = depth_stencil_format};
+    auto debug_aabb_pipeline_handle_result =
+        CreateGraphicsPipeline(pipeline_desc);
+    if (!debug_aabb_pipeline_handle_result) {
+      LOG_CRITICAL("Failed to create debug AABB pipeline: {}",
+                   debug_aabb_pipeline_handle_result.error().Message());
+      LUMINA_TERMINATE();
+    }
+    debug_aabb_pipeline_handle = debug_aabb_pipeline_handle_result.value();
     ProcessDeferredOperations();
   }
 
@@ -1205,8 +1215,15 @@ auto LuminaRenderer::Initialize() -> void {
                      .type = core::VertexAttributeType::TexCoord,
                      .element_type = core::ElementType::Vec2}})),
         .material_template = pick_id_material_template_handle,
-        .color_attachment_formats = {VK_FORMAT_R32_UINT}};
-    pick_pipeline_handle = CreateGraphicsPipeline(pipeline_desc);
+        .color_attachment_formats = {VK_FORMAT_R32_UINT},
+        .depth_stencil_attachment_format = depth_stencil_format};
+    auto pick_pipeline_handle_result = CreateGraphicsPipeline(pipeline_desc);
+    if (!pick_pipeline_handle_result) {
+      LOG_CRITICAL("Failed to create pick pipeline: {}",
+                   pick_pipeline_handle_result.error().Message());
+      LUMINA_TERMINATE();
+    }
+    pick_pipeline_handle = pick_pipeline_handle_result.value();
     ProcessDeferredOperations();
   }
 
@@ -1220,7 +1237,7 @@ auto LuminaRenderer::Initialize() -> void {
                          depth_stencil_format);
 
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
-} // namespace lumina::renderer
+}
 
 auto LuminaRenderer::Shutdown() -> void {
   shutdown_requested = true;
@@ -1420,99 +1437,23 @@ auto LuminaRenderer::DrawFrame() -> void {
   current_frame_index = (current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-static auto ToVkFormat(core::ElementType element_type) -> VkFormat {
-  switch (element_type) {
-    case core::ElementType::Float:
-      return VK_FORMAT_R32_SFLOAT;
-    case core::ElementType::Vec2:
-      return VK_FORMAT_R32G32_SFLOAT;
-    case core::ElementType::Vec3:
-      return VK_FORMAT_R32G32B32_SFLOAT;
-    case core::ElementType::Vec4:
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-    // No vertex stream uses these yet. They are listed rather than folded into
-    // a `default:` so that adding an ElementType breaks this switch instead of
-    // reaching the assert below at runtime.
-    case core::ElementType::Double:
-    case core::ElementType::Int8:
-    case core::ElementType::Uint8:
-    case core::ElementType::Int16:
-    case core::ElementType::Uint16:
-    case core::ElementType::Int32:
-    case core::ElementType::Uint32:
-    case core::ElementType::Int64:
-    case core::ElementType::Uint64:
-    case core::ElementType::Bool:
-      break;
+auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
+    -> std::expected<GraphicsPipelineHandle, common::LuminaError> {
+  auto material_template_opt =
+      material_template_manager.Get(desc.material_template);
+  if (!material_template_opt) {
+    return std::unexpected(common::LuminaError(
+        "CreateGraphicsPipeline: Material template not found"));
   }
-  ASSERT(false, "Unsupported element type for Vulkan vertex format");
-  return VK_FORMAT_UNDEFINED;
-}
-
-static auto ToVkBindingDescriptions(const VertexBufferLayout &layout)
-    -> std::vector<VkVertexInputBindingDescription> {
-  std::vector<VkVertexInputBindingDescription> descriptions;
-  descriptions.reserve(layout.streams.size());
-  for (u32 binding = 0; binding < static_cast<u32>(layout.streams.size());
-       ++binding) {
-    u32 stride = 0;
-    for (const auto &attr : layout.streams[binding].attributes) {
-      stride += core::GetElementTypeSize(attr.element_type);
-    }
-    descriptions.push_back({
-        .binding = binding,
-        .stride = stride,
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    });
+  auto &material_template = material_template_opt.value();
+  auto &shader_interface = GetShaderInterfaceFor(*material_template);
+  auto pipeline_result = ::lumina::renderer::CreateGraphicsPipeline(
+      vulkan_context, *material_template, shader_interface, desc);
+  if (!pipeline_result) {
+    return std::unexpected(pipeline_result.error());
   }
-  return descriptions;
-}
-
-static auto
-ToVkAttributeDescriptions(const VertexBufferLayout &layout,
-                          const VertexInputLayout &vertex_input_layout)
-    -> std::vector<VkVertexInputAttributeDescription> {
-  std::vector<VkVertexInputAttributeDescription> descriptions;
-  for (u32 binding = 0; binding < static_cast<u32>(layout.streams.size());
-       ++binding) {
-    u32 offset = 0;
-    for (const auto &attr : layout.streams[binding].attributes) {
-      u32 location = UINT32_MAX;
-      for (u32 i = 0; i < vertex_input_layout.input_count; ++i) {
-        if (vertex_input_layout.inputs[i].attribute_type == attr.type) {
-          location = vertex_input_layout.inputs[i].location;
-          LUMINA_CHECK(
-              vertex_input_layout.inputs[i].element_type == attr.element_type,
-              "Vertex attribute element type does not match shader vertex "
-              "input layout");
-          break;
-        }
-      }
-      // An attribute the shader does not read is legal and expected: the pick
-      // pass takes position out of the full scene vertex layout and ignores
-      // normal and texcoord, and a depth or shadow pass would do the same.
-      // Only the offset has to keep advancing regardless, or every attribute
-      // after the skipped one lands at the wrong place in the stride.
-      if (location != UINT32_MAX) {
-        descriptions.push_back({
-            .location = location,
-            .binding = binding,
-            .format = ToVkFormat(attr.element_type),
-            .offset = offset,
-        });
-      }
-      offset += core::GetElementTypeSize(attr.element_type);
-    }
-  }
-
-  // The direction that actually matters, and that nothing checked before: a
-  // shader input with no attribute behind it reads undefined vertex data
-  // instead of failing. The reverse — spare attributes — is what the loop above
-  // now tolerates.
-  LUMINA_CHECK(descriptions.size() == vertex_input_layout.input_count,
-               "Shader declares a vertex input that the vertex buffer layout "
-               "does not supply");
-  return descriptions;
+  auto &pipeline = pipeline_result.value();
+  return pipeline_manager.Create(std::move(pipeline));
 }
 
 auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
@@ -1695,200 +1636,6 @@ auto LuminaRenderer::CreateMaterialInstance(MaterialTemplateHandle tmpl_handle)
   auto material_instance_handle = material_instance_manager.Create(
       std::move(material_instance_result.value()));
   return material_instance_handle;
-}
-
-auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
-    -> GraphicsPipelineHandle {
-  auto material_template_opt =
-      material_template_manager.Get(desc.material_template);
-  if (!material_template_opt) {
-    LOG_CRITICAL("Material template not found");
-    LUMINA_TERMINATE();
-  }
-  auto &material_template = material_template_opt.value();
-  auto &shader_interface = GetShaderInterfaceFor(*material_template);
-  ShaderModuleCache shader_module_cache(vulkan_context.GetDevice());
-
-  auto vert_module_result = shader_module_cache.GetShaderModule(
-      material_template->GetVertexShaderBinPath(), VK_SHADER_STAGE_VERTEX_BIT);
-  LUMINA_CHECK(vert_module_result, "Failed to create vertex shader");
-
-  auto frag_module_result = shader_module_cache.GetShaderModule(
-      material_template->GetFragmentShaderBinPath(),
-      VK_SHADER_STAGE_FRAGMENT_BIT);
-  LUMINA_CHECK(frag_module_result, "Failed to create fragment shader");
-
-  VkPipelineShaderStageCreateInfo shader_stages[] = {
-      {
-          .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-          .pNext = nullptr,
-          .flags = 0,
-          .stage = VK_SHADER_STAGE_VERTEX_BIT,
-          .module = vert_module_result.value(),
-          .pName = "main",
-      },
-      {
-          .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-          .pNext = nullptr,
-          .flags = 0,
-          .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-          .module = frag_module_result.value(),
-          .pName = "main",
-      },
-  };
-
-  std::vector<VkDynamicState> dynamic_states = {
-      VK_DYNAMIC_STATE_VIEWPORT,
-      VK_DYNAMIC_STATE_SCISSOR,
-  };
-  VkPipelineDynamicStateCreateInfo dynamic_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .dynamicStateCount = static_cast<u32>(dynamic_states.size()),
-      .pDynamicStates = dynamic_states.data(),
-  };
-
-  auto binding_descriptions = ToVkBindingDescriptions(desc.vertex_layout);
-  auto attribute_descriptions = ToVkAttributeDescriptions(
-      desc.vertex_layout, shader_interface.GetVertexInputLayout());
-
-  VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .vertexBindingDescriptionCount =
-          static_cast<u32>(binding_descriptions.size()),
-      .pVertexBindingDescriptions = binding_descriptions.data(),
-      .vertexAttributeDescriptionCount =
-          static_cast<u32>(attribute_descriptions.size()),
-      .pVertexAttributeDescriptions = attribute_descriptions.data(),
-  };
-
-  VkPipelineInputAssemblyStateCreateInfo input_assembly_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .topology = ToVkPrimitiveTopology(desc.topology),
-      .primitiveRestartEnable = VK_FALSE,
-  };
-
-  VkPipelineViewportStateCreateInfo viewport_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .viewportCount = 1,
-      .pViewports = nullptr,
-      .scissorCount = 1,
-      .pScissors = nullptr,
-  };
-
-  VkPipelineRasterizationStateCreateInfo rasterization_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .depthClampEnable = VK_FALSE,
-      .rasterizerDiscardEnable = VK_FALSE,
-      .polygonMode = VK_POLYGON_MODE_FILL,
-      .cullMode = VK_CULL_MODE_BACK_BIT,
-      .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-      .depthBiasEnable = VK_FALSE,
-      .depthBiasConstantFactor = 0.0F,
-      .depthBiasClamp = 0.0F,
-      .depthBiasSlopeFactor = 0.0F,
-      .lineWidth = 1.0F,
-  };
-
-  VkPipelineMultisampleStateCreateInfo multisample_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-      .sampleShadingEnable = VK_FALSE,
-      .minSampleShading = 0.0F,
-      .pSampleMask = nullptr,
-      .alphaToCoverageEnable = VK_FALSE,
-      .alphaToOneEnable = VK_FALSE,
-  };
-
-  VkPipelineColorBlendAttachmentState color_blend_attachment_state{};
-  color_blend_attachment_state.colorWriteMask =
-      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-  color_blend_attachment_state.blendEnable = VK_FALSE;
-
-  VkPipelineColorBlendStateCreateInfo color_blend_state_create_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .logicOpEnable = VK_FALSE,
-      .logicOp = VK_LOGIC_OP_COPY,
-      .attachmentCount = 1,
-      .pAttachments = &color_blend_attachment_state,
-      .blendConstants = {0.0F, 0.0F, 0.0F, 0.0F},
-  };
-
-  VkPipelineRenderingCreateInfoKHR pipeline_dynamic_rendering_info{};
-  pipeline_dynamic_rendering_info.sType =
-      VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
-  pipeline_dynamic_rendering_info.pNext = nullptr;
-  pipeline_dynamic_rendering_info.colorAttachmentCount =
-      static_cast<u32>(desc.color_attachment_formats.size());
-  pipeline_dynamic_rendering_info.pColorAttachmentFormats =
-      desc.color_attachment_formats.data();
-  pipeline_dynamic_rendering_info.depthAttachmentFormat = depth_stencil_format;
-  pipeline_dynamic_rendering_info.stencilAttachmentFormat =
-      HasStencilComponent(depth_stencil_format) ? depth_stencil_format
-                                                : VK_FORMAT_UNDEFINED;
-
-  VkPipelineDepthStencilStateCreateInfo depth_stencil_state_create_info{};
-  depth_stencil_state_create_info.sType =
-      VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  depth_stencil_state_create_info.depthTestEnable = VK_TRUE;
-  depth_stencil_state_create_info.depthWriteEnable = VK_TRUE;
-  depth_stencil_state_create_info.depthCompareOp = VK_COMPARE_OP_LESS;
-  depth_stencil_state_create_info.depthBoundsTestEnable = VK_FALSE;
-  depth_stencil_state_create_info.stencilTestEnable = VK_FALSE;
-  depth_stencil_state_create_info.front = {};
-  depth_stencil_state_create_info.back = {};
-  depth_stencil_state_create_info.minDepthBounds = 0.0F;
-  depth_stencil_state_create_info.maxDepthBounds = 1.0F;
-
-  VkGraphicsPipelineCreateInfo pipeline_create_info{
-      .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-      .pNext = &pipeline_dynamic_rendering_info,
-      .flags = 0,
-      .stageCount = 2,
-      .pStages = shader_stages,
-      .pVertexInputState = &vertex_input_state_create_info,
-      .pInputAssemblyState = &input_assembly_state_create_info,
-      .pViewportState = &viewport_state_create_info,
-      .pRasterizationState = &rasterization_state_create_info,
-      .pMultisampleState = &multisample_state_create_info,
-      .pDepthStencilState = &depth_stencil_state_create_info,
-      .pColorBlendState = &color_blend_state_create_info,
-      .pDynamicState = &dynamic_state_create_info,
-      .layout = shader_interface.GetPipelineLayout(),
-      .renderPass = VK_NULL_HANDLE,
-      .subpass = 0,
-      .basePipelineHandle = VK_NULL_HANDLE,
-      .basePipelineIndex = -1,
-  };
-
-  GraphicsPipeline gfx_pipeline;
-  gfx_pipeline.vertex_layout = desc.vertex_layout;
-  gfx_pipeline.material_template = desc.material_template;
-
-  if (vkCreateGraphicsPipelines(vulkan_context.GetDevice(), nullptr, 1,
-                                &pipeline_create_info, nullptr,
-                                &gfx_pipeline.vk_pipeline) != VK_SUCCESS) {
-    LOG_CRITICAL("Failed to create graphics pipeline");
-    LUMINA_TERMINATE();
-  }
-
-  gfx_pipeline.topology = desc.topology;
-  auto handle = pipeline_manager.Create(std::move(gfx_pipeline));
-  return handle;
 }
 
 auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
@@ -2328,10 +2075,10 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
   const VertexBufferLayout *layout = nullptr;
   pipeline_manager.ForEach(
       [&](GraphicsPipelineHandle handle, GraphicsPipeline &pipeline) {
-        if (pipeline.material_template.index == material_template.index &&
-            pipeline.topology == mesh.topology) {
+        if (pipeline.desc.material_template.index == material_template.index &&
+            pipeline.desc.topology == mesh.topology) {
           pipeline_handle = handle;
-          layout = &pipeline.vertex_layout;
+          layout = &pipeline.desc.vertex_layout;
         }
       });
   LUMINA_CHECK(layout != nullptr,
@@ -2390,9 +2137,9 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
 }
 
 auto LuminaRenderer::DestroyRenderMesh(RenderMeshHandle handle) -> void {
-  auto on_destroy = [context = &this->vulkan_context](
-                        RenderMeshHandle /*handle*/,
-                        const RenderMesh &mesh) -> void {
+  auto on_destroy =
+      [context = &this->vulkan_context](RenderMeshHandle /*handle*/,
+                                        const RenderMesh &mesh) -> void {
     for (const auto &stream : mesh.vertex_streams) {
       if (stream.buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(context->GetDevice(), stream.buffer, nullptr);
@@ -2541,8 +2288,8 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
 
 auto LuminaRenderer::DestroyRenderTexture(RenderTextureHandle handle) -> void {
   render_texture_manager.Destroy(
-      handle, [context = &this->vulkan_context](
-                  RenderTextureHandle /*handle*/, const RenderTexture &rt) {
+      handle, [context = &this->vulkan_context](RenderTextureHandle /*handle*/,
+                                                const RenderTexture &rt) {
         if (rt.sampler != VK_NULL_HANDLE) {
           vkDestroySampler(context->GetDevice(), rt.sampler, nullptr);
         }

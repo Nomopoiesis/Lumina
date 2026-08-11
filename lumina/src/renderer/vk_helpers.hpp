@@ -2,8 +2,9 @@
 
 #include "lumina_assert.hpp"
 
-#include "graphics_pipeline.hpp"
-#include "shader_layout.hpp"
+#include "primitive_topology.hpp"
+#include "shaders/shader_layout.hpp"
+
 
 #include <vulkan/vulkan.h>
 
@@ -47,6 +48,40 @@ inline auto ToVkDescriptorType(DescriptorBindingType type) -> VkDescriptorType {
   // assert. Keeping the fallback after the switch preserves both.
   ASSERT(false, "Unsupported binding type");
   return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+}
+
+inline auto ToVkFormat(core::ElementType element_type) -> VkFormat {
+  switch (element_type) {
+    case core::ElementType::Float:
+      return VK_FORMAT_R32_SFLOAT;
+    case core::ElementType::Vec2:
+      return VK_FORMAT_R32G32_SFLOAT;
+    case core::ElementType::Vec3:
+      return VK_FORMAT_R32G32B32_SFLOAT;
+    case core::ElementType::Vec4:
+      return VK_FORMAT_R32G32B32A32_SFLOAT;
+    // No vertex stream uses these yet. They are listed rather than folded into
+    // a `default:` so that adding an ElementType breaks this switch instead of
+    // reaching the assert below at runtime.
+    case core::ElementType::Double:
+    case core::ElementType::Int8:
+    case core::ElementType::Uint8:
+    case core::ElementType::Int16:
+    case core::ElementType::Uint16:
+    case core::ElementType::Int32:
+    case core::ElementType::Uint32:
+    case core::ElementType::Int64:
+    case core::ElementType::Uint64:
+    case core::ElementType::Bool:
+      break;
+  }
+  ASSERT(false, "Unsupported element type for Vulkan vertex format");
+  return VK_FORMAT_UNDEFINED;
+}
+
+inline auto HasStencilComponent(VkFormat format) -> bool {
+  return format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+         format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
 
 } // namespace lumina::renderer

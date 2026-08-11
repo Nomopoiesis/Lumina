@@ -11,7 +11,7 @@
 #include "headers/simple_model_input.vert.hpp"
 #include "renderer.hpp"
 
-#include "shaders/shader_vk_helpers.hpp"
+#include "vk_helpers.hpp"
 
 #include <vulkan/vk_enum_string_helper.h>
 

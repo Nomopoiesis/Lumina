@@ -1,6 +1,6 @@
 #include "shader_interface.hpp"
 
-#include "shader_vk_helpers.hpp"
+#include "vk_helpers.hpp"
 
 #include <map>
 #include <vector>

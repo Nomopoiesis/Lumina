@@ -26,7 +26,7 @@ public:
   ~ResourceRegistry() noexcept = default;
 
   auto Create() -> ResourceHandle<T>;
-  auto Create(const T &&initial_value) -> ResourceHandle<T>;
+  auto Create(T &&initial_value) -> ResourceHandle<T>;
 
   auto Destroy(ResourceHandle<T> handle) -> void;
   auto Destroy(ResourceHandle<T> handle,
@@ -119,7 +119,7 @@ auto ResourceRegistry<T>::Create() -> ResourceHandle<T> {
 }
 
 template <typename T>
-auto ResourceRegistry<T>::Create(const T &&initial_value) -> ResourceHandle<T> {
+auto ResourceRegistry<T>::Create(T &&initial_value) -> ResourceHandle<T> {
   ResourceHandle<T> handle = Create();
   resources[handle.index].resource = std::move(initial_value);
   return handle;
