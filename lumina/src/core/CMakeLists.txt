@@ -1,5 +1,10 @@
 add_library(lumina_core STATIC)
 
+# Use precompiled header to reduce compile times for commonly included headers
+target_precompile_headers(lumina_core PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/pch.hpp>
+)
+
 # Core
 target_sources(
   lumina_core

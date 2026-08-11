@@ -1,10 +1,9 @@
 #pragma once
 
+#include "vulkan_fwd.hpp"
 #include <atomic>
-#include <vulkan/vulkan.h>
 
 #include "common/lumina_check.hpp"
-#include "material_instance_handle.hpp"
 #include "math/matrix.hpp"
 #include "render_mesh.hpp"
 #include "ui_types.hpp"

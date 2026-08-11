@@ -4,7 +4,7 @@
 
 #include "common/logger/logger.hpp"
 
-#include <vulkan/vulkan.h>
+#include "renderer/vulkan_fwd.hpp"
 
 #include <expected>
 #include <string>

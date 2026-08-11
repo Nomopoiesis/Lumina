@@ -68,4 +68,8 @@ target_include_directories(
 target_link_libraries(lumina_logger PRIVATE lumina_common
                                             lumina_platform_common)
 
+# Precompiled header for logger implementation
+target_precompile_headers(
+  lumina_logger PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp>)
+
 add_subdirectory(file_watcher)

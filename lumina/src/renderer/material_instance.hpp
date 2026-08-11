@@ -3,8 +3,8 @@
 #include "frame_context.hpp"
 #include "material_template_handle.hpp"
 
+#include "vulkan_fwd.hpp"
 #include <array>
-#include <vulkan/vulkan.h>
 
 namespace lumina::renderer {
 

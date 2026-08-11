@@ -1,5 +1,10 @@
 add_library(lumina_renderer STATIC)
 
+# Use precompiled header to reduce compile times for commonly included headers
+target_precompile_headers(
+  lumina_renderer PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/pch.hpp>)
+
 target_include_directories(
   lumina_renderer
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}

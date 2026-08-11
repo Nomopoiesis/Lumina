@@ -2,8 +2,8 @@
 
 #include "graphics_pipeline_handle.hpp"
 
+#include "vulkan_fwd.hpp"
 #include <vector>
-#include <vulkan/vulkan.h>
 
 namespace lumina::renderer {
 

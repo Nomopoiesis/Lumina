@@ -2,7 +2,7 @@
 
 #include "core/resource_handle.hpp"
 
-#include <vulkan/vulkan.h>
+#include "vulkan_fwd.hpp"
 
 namespace lumina::renderer {
 
