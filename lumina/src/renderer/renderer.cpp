@@ -658,13 +658,16 @@ CreateDepthResources(VulkanContext &vulkan_context, VkCommandPool &command_pool,
 LuminaRenderer::LuminaRenderer(platform::common::vulkan::VkInitializationResult
                                    vulkan_init_result) noexcept
     : vulkan_context(this, vulkan_init_result.instance,
-                     vulkan_init_result.surface) {}
+                     vulkan_init_result.surface),
+      device_retirement_queue(MAX_FRAMES_IN_FLIGHT) {}
 
 LuminaRenderer::~LuminaRenderer() noexcept {
   LOG_TRACE("Destroying Lumina Vulkan Renderer...");
   // Clear frame contexts first so semaphores/fences and frame command buffers
   // are destroyed before the command pool.
   frame_contexts.clear();
+
+  device_retirement_queue.Flush();
 
   render_texture_manager.DestroyAll([this](RenderTextureHandle /*handle*/,
                                            const RenderTexture &rt) -> void {
@@ -845,6 +848,7 @@ auto LuminaRenderer::ReleaseFrameContextForRender() -> void {
 // Deliberately knows nothing about what that frame produced — anything the CPU
 // wants to read back is claimed by ProcessReadbacks against its own sync point.
 auto LuminaRenderer::ReclaimFrameContext(FrameContext &frame_context) -> void {
+  device_retirement_queue.OnFrameComplete();
   frame_context.pipeline_state.store(FrameContextPipelineState::IDLE);
   frames_available_for_update.release();
 }
@@ -1548,19 +1552,28 @@ auto LuminaRenderer::FreePersistentDescriptorSets(
     LOG_CRITICAL("Material instance not found");
     LUMINA_TERMINATE();
   }
-  auto &instance = instance_opt.value();
-  const auto &descriptor_sets = instance->GetDescriptorSets();
-
-  // Check if any sets were actually allocated.
-  if (descriptor_sets[0] == VK_NULL_HANDLE) {
-    return;
-  }
-
   auto patch = [this](MaterialInstance &material_instance) -> void {
-    vkFreeDescriptorSets(vulkan_context.GetDevice(), persistent_descriptor_pool,
-                         static_cast<u32>(MAX_FRAMES_IN_FLIGHT),
-                         material_instance.GetDescriptorSets().data());
+    // Whether any sets were allocated is checked here rather than at call
+    // time, because the patch runs when the update queue drains: two calls
+    // before a drain would both pass a check made against the pre-patch state
+    // and free the same sets twice.
+    const auto descriptor_sets = material_instance.GetDescriptorSets();
+    if (descriptor_sets[0] == VK_NULL_HANDLE) {
+      return;
+    }
     material_instance.ResetDescriptorSets();
+
+    // The set handles are copied into the closure rather than read back off
+    // the instance when it fires. The entry is reset immediately above, and
+    // its registry slot can be recycled well before the retirement runs.
+    auto on_retire = [device = vulkan_context.GetDevice(),
+                      pool = persistent_descriptor_pool,
+                      descriptor_sets]() -> void {
+      vkFreeDescriptorSets(device, pool,
+                           static_cast<u32>(descriptor_sets.size()),
+                           descriptor_sets.data());
+    };
+    device_retirement_queue.Retire(std::move(on_retire));
   };
   material_instance_manager.Update(instance_handle, patch);
 }
@@ -2137,22 +2150,32 @@ auto LuminaRenderer::CreateRenderMesh(const core::StaticMesh &mesh,
 }
 
 auto LuminaRenderer::DestroyRenderMesh(RenderMeshHandle handle) -> void {
-  auto on_destroy =
-      [context = &this->vulkan_context](RenderMeshHandle /*handle*/,
-                                        const RenderMesh &mesh) -> void {
+  auto on_destroy = [context = &this->vulkan_context,
+                     retire_queue = &this->device_retirement_queue](
+                        RenderMeshHandle /*handle*/,
+                        const RenderMesh &mesh) -> void {
     for (const auto &stream : mesh.vertex_streams) {
       if (stream.buffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(context->GetDevice(), stream.buffer, nullptr);
-      }
-      if (stream.memory != VK_NULL_HANDLE) {
-        vkFreeMemory(context->GetDevice(), stream.memory, nullptr);
+        auto on_retire = [device = context->GetDevice(), buffer = stream.buffer,
+                          memory = stream.memory]() -> void {
+          vkDestroyBuffer(device, buffer, nullptr);
+          if (memory != VK_NULL_HANDLE) {
+            vkFreeMemory(device, memory, nullptr);
+          }
+        };
+        retire_queue->Retire(std::move(on_retire));
       }
     }
     if (mesh.index_buffer != VK_NULL_HANDLE) {
-      vkDestroyBuffer(context->GetDevice(), mesh.index_buffer, nullptr);
-    }
-    if (mesh.index_buffer_memory != VK_NULL_HANDLE) {
-      vkFreeMemory(context->GetDevice(), mesh.index_buffer_memory, nullptr);
+      auto on_retire = [device = context->GetDevice(),
+                        buffer = mesh.index_buffer,
+                        memory = mesh.index_buffer_memory]() -> void {
+        vkDestroyBuffer(device, buffer, nullptr);
+        if (memory != VK_NULL_HANDLE) {
+          vkFreeMemory(device, memory, nullptr);
+        }
+      };
+      retire_queue->Retire(std::move(on_retire));
     }
   };
   render_mesh_manager.Destroy(handle, on_destroy);
@@ -2288,20 +2311,26 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
 
 auto LuminaRenderer::DestroyRenderTexture(RenderTextureHandle handle) -> void {
   render_texture_manager.Destroy(
-      handle, [context = &this->vulkan_context](RenderTextureHandle /*handle*/,
-                                                const RenderTexture &rt) {
-        if (rt.sampler != VK_NULL_HANDLE) {
-          vkDestroySampler(context->GetDevice(), rt.sampler, nullptr);
-        }
-        if (rt.image_view != VK_NULL_HANDLE) {
-          vkDestroyImageView(context->GetDevice(), rt.image_view, nullptr);
-        }
-        if (rt.image != VK_NULL_HANDLE) {
-          vkDestroyImage(context->GetDevice(), rt.image, nullptr);
-        }
-        if (rt.memory != VK_NULL_HANDLE) {
-          vkFreeMemory(context->GetDevice(), rt.memory, nullptr);
-        }
+      handle, [context = &this->vulkan_context,
+               retire_queue = &this->device_retirement_queue](
+                  RenderTextureHandle /*handle*/, const RenderTexture &rt) {
+        auto on_retire = [device = context->GetDevice(), sampler = rt.sampler,
+                          image_view = rt.image_view, image = rt.image,
+                          memory = rt.memory]() -> void {
+          if (sampler != VK_NULL_HANDLE) {
+            vkDestroySampler(device, sampler, nullptr);
+          }
+          if (image_view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, image_view, nullptr);
+          }
+          if (image != VK_NULL_HANDLE) {
+            vkDestroyImage(device, image, nullptr);
+          }
+          if (memory != VK_NULL_HANDLE) {
+            vkFreeMemory(device, memory, nullptr);
+          }
+        };
+        retire_queue->Retire(std::move(on_retire));
       });
 }
 

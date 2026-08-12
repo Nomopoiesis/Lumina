@@ -85,20 +85,20 @@ static auto BuildUIBatch(Clay_RenderCommandArray commands, UISystem &ui_system,
         batch.vertices.push_back({.position = {bb.x, bb.y},
                                   .uv = {0.0F, 0.0F},
                                   .color = color,
-                                  .mode = 0u});
+                                  .mode = 0U});
         batch.vertices.push_back({.position = {bb.x + bb.width, bb.y},
                                   .uv = {1.0F, 0.0F},
                                   .color = color,
-                                  .mode = 0u});
+                                  .mode = 0U});
         batch.vertices.push_back(
             {.position = {bb.x + bb.width, bb.y + bb.height},
              .uv = {1.0F, 1.0F},
              .color = color,
-             .mode = 0u});
+             .mode = 0U});
         batch.vertices.push_back({.position = {bb.x, bb.y + bb.height},
                                   .uv = {0.0F, 1.0F},
                                   .color = color,
-                                  .mode = 0u});
+                                  .mode = 0U});
         batch.indices.insert(batch.indices.end(), {base, base + 1, base + 2,
                                                    base, base + 2, base + 3});
         break;
@@ -774,7 +774,8 @@ auto LuminaEngine::IssuePickRequest() -> void {
     draws.push_back(renderer::PickDraw{
         .mvp = math::Dot(drawable_proxy_manager.model[proxy_index],
                          pick_view_projection),
-        .draw_item_index = drawable_proxy_manager.draw_item_indices[proxy_index],
+        .draw_item_index =
+            drawable_proxy_manager.draw_item_indices[proxy_index],
         // 1-based: 0 is the target's clear value and means "nothing here".
         .slot = static_cast<u32>(pick_candidates.size()),
     });
@@ -842,8 +843,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
           }
           dispatched_mesh_uploads.insert(static_mesh_handle.index);
           static_mesh_manager.GetRegistry().Update(
-              static_mesh_handle,
-              [](StaticMesh &static_mesh) -> void {
+              static_mesh_handle, [](StaticMesh &static_mesh) -> void {
                 static_mesh.render_active = true;
               });
           auto *job = job_system::GetJobManager().AcquireJob();

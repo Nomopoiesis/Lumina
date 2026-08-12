@@ -4,6 +4,7 @@
 #include "platform/platform_common/vulkan/vulkan_init_result.hpp"
 
 #include "command_context.hpp"
+#include "device_retirement_queue.hpp"
 #include "draw_item_registry.hpp"
 #include "frame_context.hpp"
 #include "graphics_pipeline.hpp"
@@ -12,6 +13,7 @@
 #include "shaders/shader_interface.hpp"
 #include "ui_renderer.hpp"
 #include "vulkan_context.hpp"
+
 
 #include "core/static_mesh.hpp"
 #include "core/texture.hpp"
@@ -367,6 +369,8 @@ private:
   std::unordered_map<DescriptorBindingType, size_t>
       persistent_descriptor_pool_budget;
   size_t max_persistent_descriptor_sets = 0;
+
+  DeviceRetirementQueue device_retirement_queue;
 
   MaterialTemplateHandle default_material_template_handle;
   MaterialTemplateHandle debug_wireframe_material_template_handle;

@@ -23,6 +23,7 @@ target_sources(
           material_template.cpp
           vertex_serializer.cpp
           draw_item_registry.cpp
+          device_retirement_queue.cpp
           ui_renderer.cpp
           shaders/shader_module_cache.cpp
           shaders/shader_interface.cpp
