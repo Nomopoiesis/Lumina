@@ -93,14 +93,18 @@ auto ParseFace(const std::string_view &line, MeshData &mesh_data) -> void {
   const char *curr = line.data();
   const char *end = line.data() + line.size();
   const char *working = curr;
-  u8 vertex_count = 0;
+
+  u16 first_index = 0;
+  u16 prev_index = 0;
+  u32 corner = 0;
+
   while (curr < end) {
-    while ((*working != ' ') && (working < end)) {
+    // The bounds test comes first on purpose: the other order dereferences
+    // working before establishing that it is still inside the line.
+    while ((working < end) && (*working != ' ')) {
       ++working;
     }
 
-    ASSERT(vertex_count < 3, "Face must have no more than 3 vertices");
-    ++vertex_count;
     auto face_indicies = ParseFaceVert(curr, working);
     auto [it, inserted] = mesh_data.vertex_dedup_cache.emplace(
         face_indicies, static_cast<u16>(mesh_data.out_positions.size()));
@@ -111,17 +115,64 @@ auto ParseFace(const std::string_view &line, MeshData &mesh_data) -> void {
       mesh_data.out_normals.push_back(
           mesh_data.raw_normals[face_indicies.normal_index]);
       mesh_data.out_tex_coords.push_back(
-          mesh_data.raw_tex_coords[face_indicies.tex_coord_index]);
+          face_indicies.tex_coord_index < mesh_data.raw_tex_coords.size()
+              ? mesh_data.raw_tex_coords[face_indicies.tex_coord_index]
+              : math::Vec2{});
     }
-    mesh_data.indices.push_back(it->second);
+
+    const u16 index = it->second;
+    if (corner == 0) {
+      first_index = index;
+    } else if (corner >= 2) {
+      mesh_data.indices.push_back(first_index);
+      mesh_data.indices.push_back(prev_index);
+      mesh_data.indices.push_back(index);
+    }
+    prev_index = index;
+    ++corner;
 
     curr = working + 1;
     working = curr;
   }
 }
 
+// OBJ does not require an object declaration. Plenty of exporters emit bare
+// vertex and face data, and data/runtime/models/suzanne.obj is one of them:
+// 1529 lines with no 'o' and no 'g'. Naming the implicit object keeps such files
+// loadable instead of tripping the assertion that used to guard this.
+//
+// The name is a counter rather than a random value on purpose. Nothing
+// downstream ever reads it - OBJ_Result carries geometry only, and ParseOBJ
+// hands back objects.begin() - so randomness would add no uniqueness the
+// counter does not already provide, while making two parses of one file
+// disagree in a debugger or a cache key.
+//
+// current_mesh_name is a view, so it is aimed at the key stored inside the map.
+// unordered_map is node-based, so that reference stays valid as the map grows;
+// a view of a local string would dangle the moment this returned.
+auto EnsureCurrentMesh(ParseContext &parse_context) -> MeshData & {
+  if (!parse_context.current_mesh_name.empty()) {
+    return parse_context.objects[std::string(parse_context.current_mesh_name)];
+  }
+
+  auto it = parse_context.objects
+                .try_emplace("unnamed_" +
+                             std::to_string(parse_context.objects.size()))
+                .first;
+  parse_context.current_mesh_name = it->first;
+  return it->second;
+}
+
 auto ParseLine(const std::string_view &line, ParseContext &parse_context)
     -> void {
+  // Splitting on '\n' yields an empty view for a blank line, and OBJ files use
+  // blank lines as separators - suzanne.obj has one at line 1027 and one at the
+  // end. Returning here rather than falling into the switch matters because
+  // line[0] on an empty view reads out of bounds before any case is chosen.
+  if (line.empty()) {
+    return;
+  }
+
   switch (line[0]) {
     case 'o': {
       parse_context.current_mesh_name = line.substr(2);
@@ -129,10 +180,7 @@ auto ParseLine(const std::string_view &line, ParseContext &parse_context)
                                     MeshData());
     } break;
     case 'v': {
-      ASSERT(!parse_context.current_mesh_name.empty(),
-             "Current mesh name is not set");
-      auto &mesh_data =
-          parse_context.objects[std::string(parse_context.current_mesh_name)];
+      auto &mesh_data = EnsureCurrentMesh(parse_context);
       if (line[1] == ' ') {
         ParseFloats<math::Vec3>(line.substr(2), mesh_data.raw_positions);
       } else if (line[1] == 'n') {
@@ -144,8 +192,7 @@ auto ParseLine(const std::string_view &line, ParseContext &parse_context)
       }
     } break;
     case 'f': {
-      auto &mesh_data =
-          parse_context.objects[std::string(parse_context.current_mesh_name)];
+      auto &mesh_data = EnsureCurrentMesh(parse_context);
       ParseFace(line.substr(2), mesh_data);
     } break;
     case '#':

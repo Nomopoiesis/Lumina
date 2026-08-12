@@ -2,7 +2,6 @@
 
 #include "console_target.hpp"
 #include "file_target.hpp"
-#include "lumina_assert.hpp"
 #include "lumina_terminate.hpp"
 
 #include <chrono>
@@ -38,9 +37,7 @@ auto Logger::Initialize(
       logger.targets_.push_back(std::move(console_target));
     } else {
       std::print("Failed to create console log target, console logging will be "
-                 "disabled");
-      ASSERT(false, "In debug mode -> Failed to create log target (log target "
-                    "is asserted in debug mode)");
+                 "disabled\n");
     }
   }
 

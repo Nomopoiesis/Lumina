@@ -40,6 +40,10 @@ endif()
 # Include compiler options
 include(cmake/CompilerOptions.cmake)
 
+# Verify the toolchain actually provides the C++23 library features used here,
+# before any of the surprises show up as compile errors in correct headers
+include(cmake/ToolchainChecks.cmake)
+
 # Include all required dependencies
 include(cmake/Dependencies.cmake)
 

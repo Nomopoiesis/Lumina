@@ -1,5 +1,6 @@
 #include "vulkan_instance.hpp"
 
+#include "common/logger/logger.hpp"
 #include "lumina_types.hpp"
 
 #include <vulkan/vk_enum_string_helper.h>
@@ -48,7 +49,7 @@ auto CreateVulkanInstance(VulkanInstanceCreateInfo &create_info)
                           create_info.application_version_patch),
       .pEngineName = "Lumina Engine",
       .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-      .apiVersion = VK_API_VERSION_1_4,
+      .apiVersion = VK_API_VERSION_1_3,
   };
 
   // Required extensions for Windows
@@ -60,8 +61,11 @@ auto CreateVulkanInstance(VulkanInstanceCreateInfo &create_info)
 #ifndef NDEBUG
   validation_layers.push_back("VK_LAYER_KHRONOS_validation");
   if (!CheckValidationLayerSupport(validation_layers)) {
-    return std::unexpected(VkInstanceCreationError{
-        .message = "Requested Vulkan validation layers not supported"});
+    LOG_WARNING("Vulkan validation layer {} is unavailable - continuing "
+                "without validation. API usage errors will go unreported; "
+                "install the validation layers to get them back.",
+                validation_layers.front());
+    validation_layers.clear();
   }
   required_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 #endif
