@@ -427,7 +427,8 @@ static constexpr common::FileWatcher::Config SHADER_WATCH_CONFIG{
 // time a shader is added. The compiled output is the thing watched rather than
 // its source: that is the file the renderer actually loads, so a change to it
 // means the compile has already landed.
-static auto RegisterShaderWatchers(common::FileWatcher &watcher) -> void {
+static auto RegisterShaderWatchers(common::FileWatcher &watcher,
+                                   renderer::LuminaRenderer &renderer) -> void {
   const auto &shader_root = common::PathRegistry::Instance().shaders.Root();
 
   // The error_code overload: an unreadable shader directory should cost
@@ -445,10 +446,9 @@ static auto RegisterShaderWatchers(common::FileWatcher &watcher) -> void {
       continue;
     }
     watcher.Watch(entry.path().string(),
-                  [](const std::string &changed_path) -> bool {
+                  [&renderer](const std::string &changed_path) -> bool {
                     LOG_DEBUG("Shader file change detected: {}", changed_path);
-                    // Nothing reads the file yet, so there is nothing to
-                    // reject.
+                    renderer.RequestShaderReload(changed_path);
                     return true;
                   });
   }
@@ -602,7 +602,7 @@ auto LuminaEngine::Initialize(const LuminaInitializeInfo &init_info) -> void {
 
   // Reports changes only — nothing rebuilds a pipeline off the back of one yet.
   instance.file_watcher = common::FileWatcher(SHADER_WATCH_CONFIG);
-  RegisterShaderWatchers(instance.file_watcher);
+  RegisterShaderWatchers(instance.file_watcher, *instance.renderer);
 
   instance.ProcessDeferredOperations();
   instance.is_initialized = true;

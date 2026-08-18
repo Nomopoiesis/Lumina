@@ -1,11 +1,8 @@
 #include "graphics_pipeline.hpp"
 
-#include "material_template.hpp"
-#include "shaders/shader_interface.hpp"
 #include "shaders/shader_module_cache.hpp"
 #include "vertex_layout.hpp"
 #include "vk_helpers.hpp"
-#include "vulkan_context.hpp"
 
 namespace {
 
@@ -85,23 +82,21 @@ auto ToVkAttributeDescriptions(const VertexBufferLayout &layout,
 
 namespace lumina::renderer {
 
-auto CreateGraphicsPipeline(VulkanContext &vulkan_context,
-                            const MaterialTemplate &material_template,
-                            const ShaderInterface &shader_interface,
+auto CreateGraphicsPipeline(const VkDevice &device,
+                            const GraphicsPipelineShaderInputs &inputs,
                             const GraphicsPipelineDesc &desc)
     -> std::expected<GraphicsPipeline, common::LuminaError> {
-  ShaderModuleCache shader_module_cache(vulkan_context.GetDevice());
+  ShaderModuleCache shader_module_cache(device);
 
   auto vert_module_result = shader_module_cache.GetShaderModule(
-      material_template.GetVertexShaderBinPath(), VK_SHADER_STAGE_VERTEX_BIT);
+      inputs.vertex_shader_bin_path, VK_SHADER_STAGE_VERTEX_BIT);
   if (!vert_module_result) {
     return std::unexpected(common::LuminaError(
         "CreateGraphicsPipeline: Failed to create vertex shader"));
   }
 
   auto frag_module_result = shader_module_cache.GetShaderModule(
-      material_template.GetFragmentShaderBinPath(),
-      VK_SHADER_STAGE_FRAGMENT_BIT);
+      inputs.fragment_shader_bin_path, VK_SHADER_STAGE_FRAGMENT_BIT);
   if (!frag_module_result) {
     return std::unexpected(common::LuminaError(
         "CreateGraphicsPipeline: Failed to create fragment shader"));
@@ -139,8 +134,8 @@ auto CreateGraphicsPipeline(VulkanContext &vulkan_context,
   };
 
   auto binding_descriptions = ToVkBindingDescriptions(desc.vertex_layout);
-  auto attribute_descriptions_result = ToVkAttributeDescriptions(
-      desc.vertex_layout, shader_interface.GetVertexInputLayout());
+  auto attribute_descriptions_result =
+      ToVkAttributeDescriptions(desc.vertex_layout, inputs.vertex_input_layout);
   if (!attribute_descriptions_result) {
     auto message =
         "CreateGraphicsPipeline: Failed to create attribute descriptions -> " +
@@ -266,7 +261,7 @@ auto CreateGraphicsPipeline(VulkanContext &vulkan_context,
       .pDepthStencilState = &depth_stencil_state_create_info,
       .pColorBlendState = &color_blend_state_create_info,
       .pDynamicState = &dynamic_state_create_info,
-      .layout = shader_interface.GetPipelineLayout(),
+      .layout = inputs.pipeline_layout,
       .renderPass = VK_NULL_HANDLE,
       .subpass = 0,
       .basePipelineHandle = VK_NULL_HANDLE,
@@ -274,8 +269,8 @@ auto CreateGraphicsPipeline(VulkanContext &vulkan_context,
   };
 
   GraphicsPipeline gfx_pipeline;
-  if (vkCreateGraphicsPipelines(vulkan_context.GetDevice(), nullptr, 1,
-                                &pipeline_create_info, nullptr,
+  if (vkCreateGraphicsPipelines(device, nullptr, 1, &pipeline_create_info,
+                                nullptr,
                                 &gfx_pipeline.vk_pipeline) != VK_SUCCESS) {
     return std::unexpected(common::LuminaError(
         "CreateGraphicsPipeline: Failed to create graphics pipeline"));

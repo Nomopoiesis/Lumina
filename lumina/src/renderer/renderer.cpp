@@ -7,6 +7,7 @@
 #include "common/lumina_terminate.hpp"
 #include "common/path_registry.hpp"
 #include "common/profiling/profiler.hpp"
+#include "core/job_system/job_manager.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
@@ -926,6 +927,7 @@ auto LuminaRenderer::RenderThread() -> void {
     // Must stay above DrawFrame, which recycles frame fences. See its note for
     // why that placement is sufficient as well as necessary.
     ProcessReadbacks();
+    DispatchShaderReloads();
     AcquireFrameContextForRender();
     DrawFrame();
     ProcessDeferredOperations();
@@ -1244,6 +1246,13 @@ auto LuminaRenderer::Initialize() -> void {
 }
 
 auto LuminaRenderer::Shutdown() -> void {
+  // Reload jobs publish through pipeline_manager from worker threads, and the
+  // job system outlives the renderer, so they have to be drained before the
+  // registries go away. Done before the render thread is asked to stop, so a
+  // result landing here still gets processed normally.
+  while (outstanding_shader_reload_jobs.load(std::memory_order_acquire) > 0) {
+    std::this_thread::yield();
+  }
   shutdown_requested = true;
   render_thread.join(); // GPU is idle when this returns
   ui_renderer.Shutdown(vulkan_context);
@@ -1449,15 +1458,139 @@ auto LuminaRenderer::CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
     return std::unexpected(common::LuminaError(
         "CreateGraphicsPipeline: Material template not found"));
   }
-  auto &material_template = material_template_opt.value();
-  auto &shader_interface = GetShaderInterfaceFor(*material_template);
+  const auto &material_template = material_template_opt.value();
+  const auto &shader_interface = GetShaderInterfaceFor(*material_template);
+  const GraphicsPipelineShaderInputs inputs{
+      .vertex_shader_bin_path = material_template->GetVertexShaderBinPath(),
+      .fragment_shader_bin_path = material_template->GetFragmentShaderBinPath(),
+      .vertex_input_layout = shader_interface.GetVertexInputLayout(),
+      .pipeline_layout = shader_interface.GetPipelineLayout(),
+  };
   auto pipeline_result = ::lumina::renderer::CreateGraphicsPipeline(
-      vulkan_context, *material_template, shader_interface, desc);
+      vulkan_context.GetDevice(), inputs, desc);
   if (!pipeline_result) {
     return std::unexpected(pipeline_result.error());
   }
   auto &pipeline = pipeline_result.value();
   return pipeline_manager.Create(std::move(pipeline));
+}
+
+auto LuminaRenderer::RequestShaderReload(std::string_view shader_bin_path)
+    -> void {
+  if (!shader_reload_requests.Push(std::string(shader_bin_path))) {
+    LOG_WARNING("Shader reload request dropped, queue full: {}",
+                shader_bin_path);
+  }
+}
+
+auto LuminaRenderer::DispatchShaderReloads() -> void {
+  std::string changed_path;
+  while (shader_reload_requests.Pop(changed_path)) {
+    pending_shader_reloads.insert(std::move(changed_path));
+  }
+  if (pending_shader_reloads.empty()) {
+    return;
+  }
+
+  // The scan lives here rather than in RequestShaderReload because it reads
+  // pipeline_manager, whose entries ProcessDeferredOperations rewrites on this
+  // same thread — running it from the watcher's thread would race a reload
+  // already landing. Everything a rebuild needs is copied out during the scan,
+  // so the jobs below never read renderer-owned state.
+  std::vector<ShaderReloadRequest> requests;
+  pipeline_manager.ForEach([this,
+                            &requests](GraphicsPipelineHandle handle,
+                                       GraphicsPipeline &pipeline) -> void {
+    auto material_template_opt =
+        material_template_manager.Get(pipeline.desc.material_template);
+    if (!material_template_opt) {
+      LOG_ERROR("Shader reload: no material template for pipeline {}",
+                handle.index);
+      return;
+    }
+    const auto &material_template = material_template_opt.value();
+    const auto &vertex_path = material_template->GetVertexShaderBinPath();
+    const auto &fragment_path = material_template->GetFragmentShaderBinPath();
+    if (!pending_shader_reloads.contains(vertex_path) &&
+        !pending_shader_reloads.contains(fragment_path)) {
+      return;
+    }
+
+    const auto &shader_interface = GetShaderInterfaceFor(*material_template);
+    requests.push_back(ShaderReloadRequest{
+        .target = handle,
+        .epoch = ++next_shader_reload_epoch,
+        .inputs =
+            {
+                .vertex_shader_bin_path = vertex_path,
+                .fragment_shader_bin_path = fragment_path,
+                .vertex_input_layout = shader_interface.GetVertexInputLayout(),
+                .pipeline_layout = shader_interface.GetPipelineLayout(),
+            },
+        .desc = pipeline.desc,
+    });
+  });
+  pending_shader_reloads.clear();
+
+  // Off the render thread: reading the .spv and letting the driver compile it
+  // is milliseconds to tens of milliseconds, and a shared header can change
+  // several shaders at once.
+  auto &job_manager = core::job_system::GetJobManager();
+  for (auto &request : requests) {
+    outstanding_shader_reload_jobs.fetch_add(1, std::memory_order_relaxed);
+    auto *job = job_manager.AcquireJob();
+    job->data = nullptr;
+    job->signal_counter = nullptr;
+    job->execute = [this, owned = std::move(request)](void * /*data*/) -> void {
+      RunShaderReload(owned);
+    };
+    job_manager.SubmitJob(job);
+  }
+}
+
+auto LuminaRenderer::RunShaderReload(const ShaderReloadRequest &request)
+    -> void {
+  auto pipeline_result = ::lumina::renderer::CreateGraphicsPipeline(
+      vulkan_context.GetDevice(), request.inputs, request.desc);
+  if (!pipeline_result) {
+    // Nothing is published, so the pipeline currently bound keeps rendering.
+    // A bad shader edit costs the reload, not the session.
+    LOG_ERROR("Shader reload failed for '{}' / '{}': {}",
+              request.inputs.vertex_shader_bin_path,
+              request.inputs.fragment_shader_bin_path,
+              pipeline_result.error().Message());
+    outstanding_shader_reload_jobs.fetch_sub(1, std::memory_order_release);
+    return;
+  }
+
+  // Update rather than Create: RenderMesh and DrawItem both cache the handle,
+  // and a record-time lookup miss silently skips the draw, so a rebuilt
+  // pipeline has to keep the handle it had and swap the VkPipeline inside.
+  // The patch runs on the render thread when the queue drains, which is also
+  // the only place with the frame counter the old pipeline needs.
+  auto *const new_pipeline = pipeline_result.value().vk_pipeline;
+  const auto epoch = request.epoch;
+  pipeline_manager.Update(
+      request.target,
+      [this, new_pipeline, epoch](GraphicsPipeline &pipeline) -> void {
+        if (epoch <= pipeline.reload_epoch) {
+          // A newer build already landed. Jobs do not finish in submission
+          // order, so this is reachable whenever an editor writes a file twice
+          // or a slow compile is overtaken. This one was never bound to a
+          // command buffer, so it can go immediately.
+          vkDestroyPipeline(vulkan_context.GetDevice(), new_pipeline, nullptr);
+          return;
+        }
+        auto *old_pipeline = pipeline.vk_pipeline;
+        pipeline.vk_pipeline = new_pipeline;
+        pipeline.reload_epoch = epoch;
+        device_retirement_queue.Retire(
+            [device = vulkan_context.GetDevice(), old_pipeline]() -> void {
+              vkDestroyPipeline(device, old_pipeline, nullptr);
+            });
+      });
+
+  outstanding_shader_reload_jobs.fetch_sub(1, std::memory_order_release);
 }
 
 auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)

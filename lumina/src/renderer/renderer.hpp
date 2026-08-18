@@ -14,7 +14,6 @@
 #include "ui_renderer.hpp"
 #include "vulkan_context.hpp"
 
-
 #include "core/static_mesh.hpp"
 #include "core/texture.hpp"
 #include "render_mesh.hpp"
@@ -27,6 +26,7 @@
 #include <optional>
 #include <semaphore>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace lumina::renderer {
@@ -209,6 +209,12 @@ public:
     return draw_item_registry;
   }
 
+  // Callable from any thread — the watcher polls on the update thread. Only
+  // enqueues: resolving which pipelines are affected reads pipeline_manager,
+  // which the render thread mutates, so that scan happens in
+  // DispatchShaderReloads instead.
+  auto RequestShaderReload(std::string_view shader_bin_path) -> void;
+
   // Returns the slot of the most recent pick if it has not been seen yet, and
   // advances `last_sequence`. Slot 0 means the pick hit nothing.
   //
@@ -297,6 +303,18 @@ private:
 
   auto CreateGraphicsPipeline(const GraphicsPipelineDesc &desc)
       -> std::expected<GraphicsPipelineHandle, common::LuminaError>;
+
+  // One pipeline's worth of rebuild work, fully self-contained: a job holding
+  // this touches no renderer state until it publishes the result.
+  struct ShaderReloadRequest {
+    GraphicsPipelineHandle target;
+    u64 epoch = 0;
+    GraphicsPipelineShaderInputs inputs;
+    GraphicsPipelineDesc desc;
+  };
+
+  auto DispatchShaderReloads() -> void;
+  auto RunShaderReload(const ShaderReloadRequest &request) -> void;
 
   size_t current_frame_index = 0;
 
@@ -414,6 +432,21 @@ private:
   // descriptor pool are sized from the same declaration and cannot disagree.
   u32 material_instance_budget = 0;
   u32 next_material_ubo_slot = 0;
+
+  // Changed shader paths handed over by the watcher thread. Drained on the
+  // render thread into `pending_shader_reloads`, which is render-thread-owned
+  // and only ever non-empty inside DispatchShaderReloads.
+  common::data_structures::LockFreeConcurrentQueue<std::string>
+      shader_reload_requests{16};
+  std::unordered_set<std::string> pending_shader_reloads;
+
+  // Render-thread-only. Stamped onto each request so a build that finishes
+  // after a newer one can be discarded instead of overwriting it.
+  u64 next_shader_reload_epoch = 0;
+
+  // Reload jobs publish their result through pipeline_manager, so they must
+  // all have finished before the renderer tears down. Shutdown waits on this.
+  std::atomic<u32> outstanding_shader_reload_jobs = 0;
 
   friend auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
       -> std::expected<void, VkInitializationError>;
