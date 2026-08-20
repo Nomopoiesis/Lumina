@@ -67,6 +67,20 @@ public:
     return result;
   }
 
+  auto operator+(Vec2 const &other) const -> Vec2 {
+    Vec2 result;
+    result.x = x + other.x;
+    result.y = y + other.y;
+    return result;
+  }
+
+  auto operator-(Vec2 const &other) const -> Vec2 {
+    Vec2 result;
+    result.x = x - other.x;
+    result.y = y - other.y;
+    return result;
+  }
+
   auto operator[](size_t idx) -> ScalarType & {
     ASSERT(idx < 2, "Vec2 index out of range");
     return e[idx];
@@ -647,18 +661,18 @@ concept LuminaVectorType =
     requires(T vec) { std::is_base_of_v<VectorBase, T>; };
 
 template <LuminaVectorType T>
-auto Normalize(const T &&vec) -> T {
+auto Normalize(const T &vec) -> T {
   T result = vec;
   return result.Normalize();
 }
 
 template <LuminaVectorType T>
-auto Length(const T &&vec) -> typename T::ScalarType {
+auto Length(const T &vec) -> typename T::ScalarType {
   return vec.Length();
 }
 
 template <LuminaVectorType T>
-auto LengthSqr(const T &&vec) -> typename T::ScalarType {
+auto LengthSqr(const T &vec) -> typename T::ScalarType {
   return vec.LengthSqr();
 }
 
