@@ -5,7 +5,7 @@
 #include "math/vector.hpp"
 #include "renderer/shaders/shader_layout.hpp"
 
-namespace lumina::shaders::position_only::vert {
+namespace lumina::shaders::pick_id::vert {
 struct PushConstants {
   lumina::math::Mat4 model;
 }; // struct PushConstants
@@ -22,4 +22,4 @@ static constexpr lumina::renderer::ShaderLayout kLayout = {
     .push_constant_size = sizeof(PushConstants),
     .push_constant_offset = 0,
     .vertex_input_layout = {.input_count = 1, .inputs = kVertexInputs}};
-} // namespace lumina::shaders::position_only::vert
+} // namespace lumina::shaders::pick_id::vert

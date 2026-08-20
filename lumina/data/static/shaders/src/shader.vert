@@ -1,8 +1,9 @@
 #version 450
 
-#include "interface.global.glsl"
+#include "blocks/view.glsl"
+#include "blocks/instancing.glsl"
 
-#include "../interfaces/simple_model_input.vert.glsl"
+#include "stages/lit_mesh.vert.glsl"
 
 void main() {
   mat4 model = instance_data.models[gl_InstanceIndex];

@@ -119,6 +119,7 @@ ShaderInterface::ShaderInterface(ShaderInterface &&other) noexcept
       descriptor_set_layouts(std::move(other.descriptor_set_layouts)),
       externally_owned_set_count(other.externally_owned_set_count),
       vertex_input_layout(other.vertex_input_layout),
+      push_constant_ranges(std::move(other.push_constant_ranges)),
       pipeline_layout(other.pipeline_layout) {
   other.m_device = VK_NULL_HANDLE;
   other.name.clear();
@@ -126,6 +127,7 @@ ShaderInterface::ShaderInterface(ShaderInterface &&other) noexcept
   other.externally_owned_set_count = 0;
   other.set_indices.clear();
   other.vertex_input_layout = {};
+  other.push_constant_ranges.clear();
   other.pipeline_layout = VK_NULL_HANDLE;
 }
 
@@ -138,6 +140,7 @@ auto ShaderInterface::operator=(ShaderInterface &&other) noexcept
     externally_owned_set_count = other.externally_owned_set_count;
     set_indices = std::move(other.set_indices);
     vertex_input_layout = other.vertex_input_layout;
+    push_constant_ranges = std::move(other.push_constant_ranges);
     pipeline_layout = other.pipeline_layout;
     other.m_device = VK_NULL_HANDLE;
     other.name.clear();
@@ -145,6 +148,7 @@ auto ShaderInterface::operator=(ShaderInterface &&other) noexcept
     other.externally_owned_set_count = 0;
     other.set_indices.clear();
     other.vertex_input_layout = {};
+    other.push_constant_ranges.clear();
     other.pipeline_layout = VK_NULL_HANDLE;
   }
   return *this;
@@ -152,8 +156,7 @@ auto ShaderInterface::operator=(ShaderInterface &&other) noexcept
 auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
                              const ShaderLayout &fragment_layout,
                              const std::string &name,
-                             VkDescriptorSetLayout global_descriptor_set_layout,
-                             const ShaderLayout &global_layout)
+                             VkDescriptorSetLayout global_descriptor_set_layout)
     -> std::expected<ShaderInterface, ShaderInterfaceCreateError> {
   ShaderInterface shader_interface;
   shader_interface.m_device = device;
@@ -219,16 +222,34 @@ auto ShaderInterface::Create(VkDevice device, const ShaderLayout &vertex_layout,
         descriptor_set_layout_result.value());
   }
 
-  // Push constants are global — sourced from the global layout so that all
-  // pipeline layouts share the same push constant range.
-  std::vector<VkPushConstantRange> push_constant_ranges;
-  if (global_layout.push_constant_size > 0) {
+  // One range per distinct span, with the stages that declared it OR'd
+  // together. Two ranges may not share a stage, but may share bytes. So
+  // different spans stay separate, and each can then be pushed on its own.
+  // Identical spans merge instead: a push must name every stage of every range
+  // covering those bytes, so two same-span ranges could never be pushed
+  // separately anyway.
+  auto &push_constant_ranges = shader_interface.push_constant_ranges;
+  auto add_push_constant_range =
+      [&push_constant_ranges](const ShaderLayout &layout,
+                              VkShaderStageFlagBits stage) -> void {
+    if (layout.push_constant_size == 0) {
+      return;
+    }
+    for (auto &existing : push_constant_ranges) {
+      if (existing.offset == layout.push_constant_offset &&
+          existing.size == layout.push_constant_size) {
+        existing.stageFlags |= static_cast<VkShaderStageFlags>(stage);
+        return;
+      }
+    }
     push_constant_ranges.push_back({
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = global_layout.push_constant_offset,
-        .size = global_layout.push_constant_size,
+        .stageFlags = static_cast<VkShaderStageFlags>(stage),
+        .offset = layout.push_constant_offset,
+        .size = layout.push_constant_size,
     });
-  }
+  };
+  add_push_constant_range(vertex_layout, VK_SHADER_STAGE_VERTEX_BIT);
+  add_push_constant_range(fragment_layout, VK_SHADER_STAGE_FRAGMENT_BIT);
 
   // Build a set-indexed layout vector for vkCreatePipelineLayout.
   // pSetLayouts[i] must be the layout for set i not the i-th populated set.

@@ -27,7 +27,7 @@
 #include "platform/platform_common/file_handle.hpp"
 #include "renderer/shaders/shader_gen/static_shader_api.hpp"
 #include "ui/ui_system.hpp"
-#include "uniform_interface/uniform_interface.hpp"
+#include "renderer/shaders/shader_gen/static_uniform_interface.hpp"
 
 using lumina::common::data_structures::DataBuffer;
 using lumina::platform::common::InvalidFileHandle;
@@ -408,6 +408,47 @@ BuildDebugAABBDrawList(const DrawableProxyManager &proxies,
         .model = math::Dot(math::ScaleMatrix(bounds.extent * 2.0F),
                            math::TranslationMatrix(bounds.center))});
   });
+}
+
+// Gathers what the Scene3D family's per-frame blocks need out of the world and
+// hands the values to the writers in shader_gen.
+//
+// The walk lives here rather than beside those writers because it is the half
+// that knows the ECS. Keeping it on this side is what lets lumina_renderer stay
+// free of World, entities and components — the same line DrawableProxyManager
+// draws, and the reason neither module has to be compiled into the other.
+static auto UpdateFrameUniforms(LuminaEngine &engine) -> void {
+  using namespace components;
+
+  auto &frame_context = *engine.GetRenderer().GetFrameContextForUpdate();
+  auto &world = engine.GetCurrentWorld();
+
+  const auto camera_id = world.GetActiveCamera();
+  const auto camera_transform = world.GetComponent<Transform>(camera_id);
+  const auto camera = world.GetComponent<Camera>(camera_id);
+  renderer::WriteFrameGlobals(frame_context,
+                              CalculateViewMatrix(camera_transform),
+                              camera.ToProjectionMatrix(),
+                              camera_transform.position);
+
+  // Sized from the cap the block declares, so gathering allocates nothing.
+  std::array<renderer::PointLight, renderer::kMaxPointLights> point_lights{};
+  u32 point_light_count = 0;
+  world.ForEachComponent<LightComponent>(
+      [&](EntityID id, const LightComponent &light) -> void {
+        if (point_light_count >= renderer::kMaxPointLights) {
+          return;
+        }
+        point_lights[point_light_count++] = {
+            .position = world.GetComponent<Transform>(id).position,
+            .intensity = light.intensity,
+            .color = light.color,
+            .attenuation_radius = light.attenation_radius,
+        };
+      });
+
+  renderer::WriteLighting(frame_context,
+                          std::span{point_lights.data(), point_light_count});
 }
 
 // One shader examined every 50ms, so the eight compiled shaders are swept in
@@ -907,7 +948,7 @@ auto LuminaEngine::ExecuteFrame() -> void {
 
   auto *job = job_system::GetJobManager().AcquireJob();
   job->execute = [](void *data) {
-    renderer::UpdateFrameUniforms(*static_cast<LuminaEngine *>(data));
+    UpdateFrameUniforms(*static_cast<LuminaEngine *>(data));
   };
   job->data = this;
   job->signal_counter = frame_sync_counter;

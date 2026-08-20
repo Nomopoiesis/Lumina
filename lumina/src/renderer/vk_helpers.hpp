@@ -60,6 +60,8 @@ inline auto ToVkFormat(core::ElementType element_type) -> VkFormat {
       return VK_FORMAT_R32G32B32_SFLOAT;
     case core::ElementType::Vec4:
       return VK_FORMAT_R32G32B32A32_SFLOAT;
+    case core::ElementType::Uint32:
+      return VK_FORMAT_R32_UINT;
     // No vertex stream uses these yet. They are listed rather than folded into
     // a `default:` so that adding an ElementType breaks this switch instead of
     // reaching the assert below at runtime.
@@ -69,7 +71,6 @@ inline auto ToVkFormat(core::ElementType element_type) -> VkFormat {
     case core::ElementType::Int16:
     case core::ElementType::Uint16:
     case core::ElementType::Int32:
-    case core::ElementType::Uint32:
     case core::ElementType::Int64:
     case core::ElementType::Uint64:
     case core::ElementType::Bool:

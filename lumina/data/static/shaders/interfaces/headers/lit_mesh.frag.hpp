@@ -6,7 +6,7 @@
 #include "renderer/shaders/shader_layout.hpp"
 #include <vulkan/vulkan.h>
 
-namespace lumina::shaders::simple_input_basic_mat::frag {
+namespace lumina::shaders::lit_mesh::frag {
 struct MaterialUniforms {
   float ambient_intensity;
   uint8_t _pad0[12];
@@ -80,4 +80,4 @@ inline void WriteDescriptors(VkDevice device, VkDescriptorSet set,
   };
   vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
 }
-} // namespace lumina::shaders::simple_input_basic_mat::frag
+} // namespace lumina::shaders::lit_mesh::frag

@@ -37,10 +37,6 @@ namespace lumina::core::job_system {
 struct Counter;
 } // namespace lumina::core::job_system
 
-namespace lumina::renderer {
-auto UpdateFrameUniforms(lumina::core::LuminaEngine &engine) -> void;
-} // namespace lumina::renderer
-
 namespace lumina::core {
 
 struct LuminaInitializeInfo {
@@ -190,8 +186,6 @@ private:
   static auto GetStaticInstance() -> LuminaEngine &;
 
   auto ProcessDeferredOperations() -> void;
-
-  friend auto renderer::UpdateFrameUniforms(LuminaEngine &engine) -> void;
 
   bool is_initialized = false;
 

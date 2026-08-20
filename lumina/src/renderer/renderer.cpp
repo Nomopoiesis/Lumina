@@ -423,7 +423,8 @@ auto LuminaRenderer::CreateDescriptorPools()
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .pNext = nullptr,
       .flags = 0,
-      .maxSets = 1,
+      // One set 0 per family, all from this frame's pool.
+      .maxSets = static_cast<u32>(kGlobalShaderFamilyCount),
       .poolSizeCount = static_cast<u32>(transient_pool_sizes.size()),
       .pPoolSizes = transient_pool_sizes.data(),
   };
@@ -788,16 +789,14 @@ LuminaRenderer::~LuminaRenderer() noexcept {
       });
   pipeline_manager.ProcessDeferredOperations();
 
-  // Destroy shader interfaces before the global DSL they reference.
+  // Destroy shader interfaces before the family DSLs they reference.
   shader_interfaces.clear();
 
-  if (global_pipeline_layout != VK_NULL_HANDLE) {
-    vkDestroyPipelineLayout(vulkan_context.GetDevice(), global_pipeline_layout,
-                            nullptr);
-  }
-  if (global_descriptor_set_layout != VK_NULL_HANDLE) {
-    vkDestroyDescriptorSetLayout(vulkan_context.GetDevice(),
-                                 global_descriptor_set_layout, nullptr);
+  for (auto *family_layout : global_descriptor_set_layouts) {
+    if (family_layout != VK_NULL_HANDLE) {
+      vkDestroyDescriptorSetLayout(vulkan_context.GetDevice(), family_layout,
+                                   nullptr);
+    }
   }
 }
 
@@ -1095,11 +1094,18 @@ auto LuminaRenderer::Initialize() -> void {
       LUMINA_TERMINATE();
     }
     frame_contexts.push_back(std::move(frame_context_result.value()));
-    auto &uniform_buffer = frame_contexts[i]->GetUniformBuffer();
-    auto uniform_buffer_result = CreateUniformBuffer(
-        vulkan_context, uniform_buffer.memory, uniform_buffer.buffer,
-        uniform_buffer.mapped, GetFrameGlobalsBufferSize());
-    LUMINA_CHECK(uniform_buffer_result, "Failed to create uniform buffer");
+    auto &scene3d = frame_contexts[i]->GetShaderFamilyScene3DResources();
+    auto frame_globals_buffer_result = CreateUniformBuffer(
+        vulkan_context, scene3d.frame_globals.memory,
+        scene3d.frame_globals.buffer, scene3d.frame_globals.mapped,
+        GetFrameGlobalsBufferSize());
+    LUMINA_CHECK(frame_globals_buffer_result,
+                 "Failed to create frame globals uniform buffer");
+    auto lighting_buffer_result = CreateUniformBuffer(
+        vulkan_context, scene3d.lighting.memory, scene3d.lighting.buffer,
+        scene3d.lighting.mapped, GetLightingBufferSize());
+    LUMINA_CHECK(lighting_buffer_result,
+                 "Failed to create lighting uniform buffer");
     auto instance_buffer_result = CreateInstanceBuffer(
         vulkan_context, frame_contexts[i]->GetInstanceBuffer(), 4096);
     LUMINA_CHECK(instance_buffer_result, "Failed to create instance buffer");
@@ -1233,14 +1239,45 @@ auto LuminaRenderer::Initialize() -> void {
     ProcessDeferredOperations();
   }
 
-  ui_renderer.Initialize(vulkan_context,
-                         lumina::common::PathRegistry::Instance()
-                             .shaders.Resolve("ui.vert.spv")
-                             .string(),
-                         lumina::common::PathRegistry::Instance()
-                             .shaders.Resolve("ui.frag.spv")
-                             .string(),
-                         depth_stencil_format);
+  {
+    // The UI goes through the same pipeline path as everything else: its vertex
+    // layout is matched against ui_2d::vert's reflected inputs, so UIVertex and
+    // the shader can no longer disagree silently.
+    //
+    // No depth attachment and no depth test — it draws over the finished scene
+    // — and blending on, which is the whole reason those fields exist on the
+    // desc.
+    auto pipeline_desc = GraphicsPipelineDesc{
+        .vertex_layout = VertexBufferLayout::Interleave(
+            std::span<const core::VertexAttribute>(
+                {core::VertexAttribute{.type =
+                                           core::VertexAttributeType::Position,
+                                       .element_type = core::ElementType::Vec2},
+                 core::VertexAttribute{.type =
+                                           core::VertexAttributeType::TexCoord,
+                                       .element_type = core::ElementType::Vec2},
+                 core::VertexAttribute{.type = core::VertexAttributeType::Color,
+                                       .element_type = core::ElementType::Vec4},
+                 core::VertexAttribute{
+                     .type = core::VertexAttributeType::Custom0,
+                     .element_type = core::ElementType::Uint32}})),
+        .material_template = ui_material_template_handle,
+        .color_attachment_formats = {vulkan_context.GetSwapChainImageFormat()},
+        .depth_stencil_attachment_format = VK_FORMAT_UNDEFINED,
+        .cull_mode = VK_CULL_MODE_NONE,
+        .enable_depth_test = false,
+        .enable_blending = true};
+    auto ui_pipeline_handle_result = CreateGraphicsPipeline(pipeline_desc);
+    if (!ui_pipeline_handle_result) {
+      LOG_CRITICAL("Failed to create UI pipeline: {}",
+                   ui_pipeline_handle_result.error().Message());
+      LUMINA_TERMINATE();
+    }
+    ui_pipeline_handle = ui_pipeline_handle_result.value();
+    ProcessDeferredOperations();
+  }
+
+  ui_renderer.Initialize(vulkan_context);
 
   render_thread = std::thread(&LuminaRenderer::RenderThread, this);
 }
@@ -1292,10 +1329,21 @@ auto LuminaRenderer::DrawUI(FrameContext &frame_context,
   };
   vkCmdBeginRendering(command_buffer, &rendering_info);
 
-  ui_renderer.RecordCommands(
-      command_buffer, static_cast<u32>(current_frame_index),
-      frame_context.ui_batch, swap_chain_image_extent.width,
-      swap_chain_image_extent.height, vulkan_context);
+  // Resolved here rather than inside UIRenderer: these registries are mutated
+  // by ProcessDeferredOperations on this same thread, so the lookup belongs
+  // with the other record-time lookups.
+  auto ui_pipeline_opt = pipeline_manager.Get(ui_pipeline_handle);
+  auto ui_template_opt =
+      material_template_manager.Get(ui_material_template_handle);
+  if (ui_pipeline_opt.has_value() && ui_template_opt.has_value()) {
+    auto &ui_si = GetShaderInterfaceFor(*ui_template_opt.value());
+    ui_renderer.RecordCommands(
+        command_buffer, static_cast<u32>(current_frame_index),
+        frame_context.ui_batch, swap_chain_image_extent.width,
+        swap_chain_image_extent.height, ui_pipeline_opt.value()->vk_pipeline,
+        ui_si.GetPipelineLayout(), ui_si.GetPushConstantRanges(),
+        frame_context.GetTransientDescriptorSet(GlobalShaderFamily::Screen2D));
+  }
 
   vkCmdEndRendering(command_buffer);
 }
@@ -1601,26 +1649,50 @@ auto LuminaRenderer::PrepareFrameDescriptors(FrameContext &frame_context)
   // Reset the transient pool
   vkResetDescriptorPool(device, pool, 0);
 
-  // Allocate a single descriptor set for set 0 (per-frame globals).
-  LUMINA_CHECK(global_descriptor_set_layout != VK_NULL_HANDLE,
-               "Global descriptor set layout not created");
-  auto dsl = global_descriptor_set_layout;
+  // One set 0 per family. Allocated every frame rather than once, because the
+  // pool reset above invalidates them all — including families whose contents
+  // never change, which is also why rewriting them here is not wasteful enough
+  // to be worth a persistent-pool path.
+  for (size_t i = 0; i < kGlobalShaderFamilyCount; ++i) {
+    const auto family = static_cast<GlobalShaderFamily>(i);
+    auto dsl = global_descriptor_set_layouts[i];
+    LUMINA_CHECK(dsl != VK_NULL_HANDLE,
+                 "Global descriptor set layout not created for a family");
 
-  VkDescriptorSetAllocateInfo alloc_info = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-      .pNext = nullptr,
-      .descriptorPool = pool,
-      .descriptorSetCount = 1,
-      .pSetLayouts = &dsl,
-  };
+    VkDescriptorSetAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .descriptorPool = pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &dsl,
+    };
 
-  VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-  VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set),
-           "Failed to allocate transient descriptor set");
+    // Screen2D cannot be written until the atlas upload has published a view:
+    // a combined image sampler write needs a real one. Leaving the family's
+    // handle null rather than allocating a set nobody writes is what makes the
+    // handle mean "written this frame" — a set that exists but was never
+    // updated is not a blank texture, it is a draw-time validation error.
+    if (family == GlobalShaderFamily::Screen2D && !IsUIFontAtlasBound()) {
+      frame_context.SetTransientDescriptorSet(family, VK_NULL_HANDLE);
+      continue;
+    }
 
-  WriteTransientDescriptors(this, frame_context, descriptor_set);
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set),
+             "Failed to allocate transient descriptor set");
+    frame_context.SetTransientDescriptorSet(family, descriptor_set);
 
-  frame_context.SetTransientDescriptorSet(descriptor_set);
+    switch (family) {
+      case GlobalShaderFamily::Scene3D:
+        WriteTransientDescriptors(this, frame_context, descriptor_set);
+        break;
+      case GlobalShaderFamily::Screen2D:
+        WriteUIDescriptors(this, descriptor_set);
+        break;
+      case GlobalShaderFamily::Count_:
+        break;
+    }
+  }
 }
 
 auto LuminaRenderer::AllocatePersistentDescriptorSets(
@@ -1903,9 +1975,17 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
   };
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-  vkCmdBindDescriptorSets(
-      command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, global_pipeline_layout,
-      0, 1, &frame_context.GetTransientDescriptorSet(), 0, nullptr);
+  VkPipelineLayout bound_global_layout = VK_NULL_HANDLE;
+  auto bind_global_set = [&](VkPipelineLayout layout) -> void {
+    if (layout == bound_global_layout) {
+      return;
+    }
+    vkCmdBindDescriptorSets(
+        command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
+        &frame_context.GetTransientDescriptorSet(GlobalShaderFamily::Scene3D),
+        0, nullptr);
+    bound_global_layout = layout;
+  };
 
   // Accumulated locally and published once below: an atomic increment per draw
   // would put contended traffic in the hottest loop in the renderer.
@@ -1941,6 +2021,8 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
     }
     auto &material_template = material_template_opt.value();
     auto &si = GetShaderInterfaceFor(*material_template);
+
+    bind_global_set(si.GetPipelineLayout());
 
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipeline->vk_pipeline);
@@ -1981,6 +2063,8 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
     auto &material_template = material_template_opt.value();
     auto &dbg_si = GetShaderInterfaceFor(*material_template);
 
+    bind_global_set(dbg_si.GetPipelineLayout());
+
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipeline->vk_pipeline);
     VkDeviceSize offsets[] = {0};
@@ -1988,9 +2072,11 @@ auto LuminaRenderer::RecordCommandBuffer(FrameContext &frame_context,
                            &render_mesh->vertex_streams[0].buffer, offsets);
     vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
                          VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(command_buffer, dbg_si.GetPipelineLayout(),
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
-                       &debug_draw.model);
+    for (const auto &range : dbg_si.GetPushConstantRanges()) {
+      vkCmdPushConstants(command_buffer, dbg_si.GetPipelineLayout(),
+                         range.stageFlags, range.offset, range.size,
+                         &debug_draw.model);
+    }
     vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh->index_count),
                      1, 0, 0, 0);
     ++draw_calls;
@@ -2032,8 +2118,8 @@ auto LuminaRenderer::RecordPickPass(FrameContext &frame_context,
     return;
   }
   auto &pipeline = pipeline_opt.value();
-  auto *pipeline_layout =
-      GetShaderInterfaceFor(*material_template_opt.value()).GetPipelineLayout();
+  auto &pick_si = GetShaderInterfaceFor(*material_template_opt.value());
+  auto *pipeline_layout = pick_si.GetPipelineLayout();
 
   // Both attachments are fully overwritten by the clear, so discarding whatever
   // the previous pick left in them is exactly what UNDEFINED is for.
@@ -2143,9 +2229,10 @@ auto LuminaRenderer::RecordPickPass(FrameContext &frame_context,
                            &render_mesh->vertex_streams[0].buffer, offsets);
     vkCmdBindIndexBuffer(command_buffer, render_mesh->index_buffer, 0,
                          VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(command_buffer, pipeline_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(math::Mat4),
-                       &draw.mvp);
+    for (const auto &range : pick_si.GetPushConstantRanges()) {
+      vkCmdPushConstants(command_buffer, pipeline_layout, range.stageFlags,
+                         range.offset, range.size, &draw.mvp);
+    }
     // firstInstance is the id channel: gl_InstanceIndex is firstInstance plus
     // the instance number, and there is exactly one instance.
     vkCmdDrawIndexed(command_buffer, static_cast<u32>(render_mesh->index_count),
@@ -2434,8 +2521,10 @@ auto LuminaRenderer::CreateRenderTexture(const core::Texture &texture)
             handle, [](RenderTexture &rt) -> void { rt.ready = true; });
         UpdateLitMaterialTextures(renderer, rt_sampler, rt_image_view);
         if (is_font_atlas) {
-          renderer->ui_renderer.SetFontAtlas(*ctx->vulkan_context,
-                                             rt_image_view, rt_sampler);
+          // Publishes what the Screen2D family's set 0 points at. The sets
+          // themselves are written in PrepareFrameDescriptors, so nothing here
+          // touches a descriptor a frame in flight might still be using.
+          renderer->SetUIFontAtlas(rt_image_view, rt_sampler);
         }
       });
   SubmitCommandContext(cmd_ctx);

@@ -25,8 +25,6 @@ target_sources(
           debug_overlay_controller.cpp
           static_mesh_manager.cpp)
 
-# Uniform interface
-target_sources(lumina_core PRIVATE uniform_interface/uniform_interface.cpp)
 
 # Job system
 target_sources(lumina_core PRIVATE job_system/job_manager.cpp)

@@ -6,9 +6,11 @@
 #include "common/lumina_check.hpp"
 #include "math/matrix.hpp"
 #include "render_mesh.hpp"
+#include "shaders/global_shader_family.hpp"
 #include "ui_types.hpp"
 #include "vulkan_context.hpp"
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -75,6 +77,17 @@ struct FrameContextUniformBuffer {
   void *mapped = nullptr;
 };
 
+// Per-frame data backing the Scene3D family's set 0. Grouped rather than held
+// as loose members so a family's resources arrive as one struct instead of the
+// member list growing every time a binding is added.
+//
+// instance_buffer is not in here yet: it has its own capacity-growth path and
+// several call sites, and it joins when the family table lands.
+struct Scene3DFrameResources {
+  FrameContextUniformBuffer frame_globals; // set 0, binding 0
+  FrameContextUniformBuffer lighting;      // set 0, binding 2
+};
+
 struct FrameContextInstanceBuffer {
   FrameContextInstanceBuffer() noexcept = default;
   FrameContextInstanceBuffer(const FrameContextInstanceBuffer &) = delete;
@@ -134,14 +147,16 @@ public:
     return frame_transient_descriptor_pool;
   }
 
-  auto SetTransientDescriptorSet(VkDescriptorSet descriptor_set) noexcept
+  auto SetTransientDescriptorSet(GlobalShaderFamily family,
+                                 VkDescriptorSet descriptor_set) noexcept
       -> void {
-    frame_transient_descriptor_set = descriptor_set;
+    frame_transient_descriptor_sets[FamilyIndex(family)] = descriptor_set;
   }
 
-  [[nodiscard]] auto GetTransientDescriptorSet() const noexcept
+  [[nodiscard]] auto
+  GetTransientDescriptorSet(GlobalShaderFamily family) const noexcept
       -> const VkDescriptorSet & {
-    return frame_transient_descriptor_set;
+    return frame_transient_descriptor_sets[FamilyIndex(family)];
   }
 
   // The state of the pipeline for this frame context
@@ -152,8 +167,8 @@ public:
   std::atomic<FrameContextPipelineState> pipeline_state =
       FrameContextPipelineState::IDLE;
 
-  auto GetUniformBuffer() noexcept -> FrameContextUniformBuffer & {
-    return uniform_buffer;
+  auto GetShaderFamilyScene3DResources() noexcept -> Scene3DFrameResources & {
+    return scene3d;
   }
 
   auto GetInstanceBuffer() noexcept -> FrameContextInstanceBuffer & {
@@ -182,9 +197,10 @@ private:
   VkFence frame_begin_ready_fence = VK_NULL_HANDLE;
 
   VkDescriptorPool frame_transient_descriptor_pool = VK_NULL_HANDLE;
-  VkDescriptorSet frame_transient_descriptor_set = VK_NULL_HANDLE;
+  std::array<VkDescriptorSet, kGlobalShaderFamilyCount>
+      frame_transient_descriptor_sets{};
 
-  FrameContextUniformBuffer uniform_buffer;
+  Scene3DFrameResources scene3d;
   FrameContextInstanceBuffer instance_buffer;
 };
 

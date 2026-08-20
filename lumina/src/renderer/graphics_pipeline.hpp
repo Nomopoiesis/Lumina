@@ -19,6 +19,9 @@ struct GraphicsPipelineDesc {
   PrimitiveTopology topology = PrimitiveTopology::TriangleList;
   std::vector<VkFormat> color_attachment_formats;
   VkFormat depth_stencil_attachment_format = VK_FORMAT_UNDEFINED;
+  VkCullModeFlags cull_mode = VK_CULL_MODE_NONE;
+  bool enable_depth_test = true;
+  bool enable_blending = false;
 };
 
 struct GraphicsPipeline {

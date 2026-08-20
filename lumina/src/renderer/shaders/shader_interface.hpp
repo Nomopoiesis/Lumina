@@ -6,6 +6,8 @@
 
 #include "renderer/vulkan_fwd.hpp"
 
+#include <vulkan/vulkan.h>
+
 #include <expected>
 #include <string>
 #include <vector>
@@ -21,8 +23,7 @@ public: // static methods
   static auto Create(VkDevice device, const ShaderLayout &vertex_layout,
                      const ShaderLayout &fragment_layout,
                      const std::string &name,
-                     VkDescriptorSetLayout global_descriptor_set_layout,
-                     const ShaderLayout &global_layout)
+                     VkDescriptorSetLayout global_descriptor_set_layout)
       -> std::expected<ShaderInterface, ShaderInterfaceCreateError>;
 
 public: // instance methods
@@ -47,6 +48,11 @@ public: // instance methods
     return pipeline_layout;
   }
 
+  [[nodiscard]] auto GetPushConstantRanges() const
+      -> const std::vector<VkPushConstantRange> & {
+    return push_constant_ranges;
+  }
+
   [[nodiscard]] auto GetVertexInputLayout() const -> const VertexInputLayout & {
     return vertex_input_layout;
   }
@@ -61,6 +67,7 @@ private: // instance members
   std::vector<VkDescriptorSetLayout> descriptor_set_layouts;
   u32 externally_owned_set_count = 0;
   VertexInputLayout vertex_input_layout;
+  std::vector<VkPushConstantRange> push_constant_ranges;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 };
 

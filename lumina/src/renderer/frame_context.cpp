@@ -46,15 +46,21 @@ FrameContext::~FrameContext() noexcept {
                             frame_transient_descriptor_pool, nullptr);
   }
 
-  if (uniform_buffer.mapped != nullptr) {
-    vkUnmapMemory(vulkan_context.GetDevice(), uniform_buffer.memory);
-  }
-  if (uniform_buffer.buffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(vulkan_context.GetDevice(), uniform_buffer.buffer, nullptr);
-  }
-  if (uniform_buffer.memory != VK_NULL_HANDLE) {
-    vkFreeMemory(vulkan_context.GetDevice(), uniform_buffer.memory, nullptr);
-  }
+  auto destroy_uniform_buffer =
+      [this](FrameContextUniformBuffer &uniform_buffer) -> void {
+    if (uniform_buffer.mapped != nullptr) {
+      vkUnmapMemory(vulkan_context.GetDevice(), uniform_buffer.memory);
+    }
+    if (uniform_buffer.buffer != VK_NULL_HANDLE) {
+      vkDestroyBuffer(vulkan_context.GetDevice(), uniform_buffer.buffer,
+                      nullptr);
+    }
+    if (uniform_buffer.memory != VK_NULL_HANDLE) {
+      vkFreeMemory(vulkan_context.GetDevice(), uniform_buffer.memory, nullptr);
+    }
+  };
+  destroy_uniform_buffer(scene3d.frame_globals);
+  destroy_uniform_buffer(scene3d.lighting);
 
   if (instance_buffer.mapped != nullptr) {
     vkUnmapMemory(vulkan_context.GetDevice(), instance_buffer.memory);

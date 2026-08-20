@@ -28,6 +28,7 @@ target_sources(
           shaders/shader_module_cache.cpp
           shaders/shader_interface.cpp
           shaders/shader_gen/static_shader_api.cpp
+          shaders/shader_gen/static_uniform_interface.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/../core/vertex_attribute.cpp)
 
 target_link_libraries(

@@ -25,6 +25,10 @@ auto GetGlobalDescriptorPoolSizes(std::vector<VkDescriptorPoolSize> &pool_sizes)
 // without including the generated header.
 auto GetFrameGlobalsBufferSize() -> VkDeviceSize;
 
+// Returns sizeof(Lighting), for the same reason. Its own binding rather than a
+// member of FrameGlobals so that only lit shaders declare it.
+auto GetLightingBufferSize() -> VkDeviceSize;
+
 // Returns sizeof(MaterialUniforms) so renderer.cpp can create the buffer
 // without including the generated header.
 auto GetDefaultMaterialUBOSize() -> VkDeviceSize;
@@ -67,5 +71,10 @@ auto SetLitMaterialDiffuseColor(LuminaRenderer *renderer,
 auto WriteTransientDescriptors(LuminaRenderer *renderer,
                                FrameContext &frame_context,
                                VkDescriptorSet descriptor_set) -> void;
+
+// Points the Screen2D family's set 0 at the font atlas. Only valid once the
+// atlas upload has published a view and sampler.
+auto WriteUIDescriptors(LuminaRenderer *renderer,
+                        VkDescriptorSet descriptor_set) -> void;
 
 } // namespace lumina::renderer

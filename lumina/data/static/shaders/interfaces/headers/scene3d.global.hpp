@@ -6,7 +6,14 @@
 #include "renderer/shaders/shader_layout.hpp"
 #include <vulkan/vulkan.h>
 
-namespace lumina::shaders::interface::global {
+namespace lumina::shaders::scene3d::global {
+struct FrameGlobals {
+  lumina::math::Mat4 view;
+  lumina::math::Mat4 proj;
+  lumina::math::Vec3 camera_position;
+  uint8_t _pad0[4];
+}; // struct FrameGlobals
+
 struct PointLight {
   lumina::math::Vec3 position;
   float intensity;
@@ -14,17 +21,11 @@ struct PointLight {
   float attenuation_radius;
 }; // struct PointLight
 
-struct FrameGlobals {
-  lumina::math::Mat4 view;
-  lumina::math::Mat4 proj;
+struct Lighting {
   PointLight point_lights[16];
-  lumina::math::Vec3 camera_position;
   int32_t point_light_count;
-}; // struct FrameGlobals
-
-struct PushConstants {
-  lumina::math::Mat4 model;
-}; // struct PushConstants
+  uint8_t _pad0[12];
+}; // struct Lighting
 
 static constexpr lumina::renderer::ShaderBindingInfo kBindings[] = {
     {.set = 0,
@@ -38,13 +39,19 @@ static constexpr lumina::renderer::ShaderBindingInfo kBindings[] = {
      .type = lumina::renderer::DescriptorBindingType::StorageBuffer,
      .name = "instance_data",
      .block_size = 0,
+     .array_count = 1},
+    {.set = 0,
+     .binding = 2,
+     .type = lumina::renderer::DescriptorBindingType::UniformBuffer,
+     .name = "lighting",
+     .block_size = sizeof(Lighting),
      .array_count = 1}};
 
 static constexpr lumina::renderer::ShaderLayout kLayout = {
     .stage = lumina::renderer::ShaderStage::Global,
-    .binding_count = 2,
+    .binding_count = 3,
     .bindings = kBindings,
-    .push_constant_size = sizeof(PushConstants),
+    .push_constant_size = 0,
     .push_constant_offset = 0,
     .vertex_input_layout = {}};
 
@@ -55,6 +62,9 @@ struct BindingData {
   VkBuffer instance_data_buffer;
   VkDeviceSize instance_data_offset = 0;
   VkDeviceSize instance_data_range = VK_WHOLE_SIZE;
+  VkBuffer lighting_buffer;
+  VkDeviceSize lighting_offset = 0;
+  VkDeviceSize lighting_range = sizeof(Lighting);
 }; // struct BindingData
 
 inline void WriteDescriptors(VkDevice device, VkDescriptorSet set,
@@ -68,6 +78,11 @@ inline void WriteDescriptors(VkDevice device, VkDescriptorSet set,
       .buffer = data.instance_data_buffer,
       .offset = data.instance_data_offset,
       .range = data.instance_data_range,
+  };
+  VkDescriptorBufferInfo buffer_info_2{
+      .buffer = data.lighting_buffer,
+      .offset = data.lighting_offset,
+      .range = data.lighting_range,
   };
   VkWriteDescriptorSet writes[] = {
       {
@@ -86,7 +101,15 @@ inline void WriteDescriptors(VkDevice device, VkDescriptorSet set,
           .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
           .pBufferInfo = &buffer_info_1,
       },
+      {
+          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .dstSet = set,
+          .dstBinding = 2,
+          .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          .pBufferInfo = &buffer_info_2,
+      },
   };
-  vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+  vkUpdateDescriptorSets(device, 3, writes, 0, nullptr);
 }
-} // namespace lumina::shaders::interface::global
+} // namespace lumina::shaders::scene3d::global

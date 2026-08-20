@@ -7,6 +7,7 @@
 #include "device_retirement_queue.hpp"
 #include "draw_item_registry.hpp"
 #include "frame_context.hpp"
+#include "shaders/global_shader_family.hpp"
 #include "graphics_pipeline.hpp"
 #include "material_instance.hpp"
 #include "material_instance_handle.hpp"
@@ -22,6 +23,7 @@
 #include "common/data_structures/lock_free_concurrent_queue.hpp"
 #include "common/data_structures/lock_free_object_pool.hpp"
 
+#include <array>
 #include <atomic>
 #include <optional>
 #include <semaphore>
@@ -195,14 +197,29 @@ public:
     pick_id_material_template_handle = handle;
   }
 
+  auto SetUIMaterialTemplate(MaterialTemplateHandle handle) -> void {
+    ui_material_template_handle = handle;
+  }
+
   [[nodiscard]] auto GetDebugWireframeMaterialTemplateHandle() const noexcept
       -> MaterialTemplateHandle {
     return debug_wireframe_material_template_handle;
   }
 
-  [[nodiscard]] auto GetGlobalDescriptorSetLayout() const noexcept
+  [[nodiscard]] auto
+  GetGlobalDescriptorSetLayout(GlobalShaderFamily family) const noexcept
       -> VkDescriptorSetLayout {
-    return global_descriptor_set_layout;
+    return global_descriptor_set_layouts[FamilyIndex(family)];
+  }
+
+  auto SetUIFontAtlas(VkImageView image_view, VkSampler sampler) noexcept
+      -> void {
+    ui_font_atlas_image_view = image_view;
+    ui_font_atlas_sampler = sampler;
+  }
+
+  [[nodiscard]] auto IsUIFontAtlasBound() const noexcept -> bool {
+    return ui_font_atlas_image_view != VK_NULL_HANDLE;
   }
 
   [[nodiscard]] auto GetDrawItemRegistry() -> DrawItemRegistry & {
@@ -393,10 +410,12 @@ private:
   MaterialTemplateHandle default_material_template_handle;
   MaterialTemplateHandle debug_wireframe_material_template_handle;
   MaterialTemplateHandle pick_id_material_template_handle;
+  MaterialTemplateHandle ui_material_template_handle;
   MaterialInstanceHandle default_material_instance_handle;
   GraphicsPipelineHandle default_pipeline_handle;
   GraphicsPipelineHandle debug_aabb_pipeline_handle;
   GraphicsPipelineHandle pick_pipeline_handle;
+  GraphicsPipelineHandle ui_pipeline_handle;
 
   UIRenderer ui_renderer;
 
@@ -410,8 +429,19 @@ private:
 
   VkDescriptorPool persistent_descriptor_pool = VK_NULL_HANDLE;
 
-  VkDescriptorSetLayout global_descriptor_set_layout = VK_NULL_HANDLE;
-  VkPipelineLayout global_pipeline_layout = VK_NULL_HANDLE;
+  // One set 0 layout per family. No companion pipeline layout: push constant
+  // ranges are per shader and count towards layout compatibility, so no single
+  // layout is compatible with every pipeline sharing a family's set. Set 0 is
+  // bound through each shader interface's own layout — see RecordCommandBuffer.
+  std::array<VkDescriptorSetLayout, kGlobalShaderFamilyCount>
+      global_descriptor_set_layouts{};
+
+  // What the Screen2D family's set 0 points at. Held here rather than in
+  // UIRenderer because the descriptor set belongs to the frame context, and it
+  // is written from PrepareFrameDescriptors. Null until the atlas upload
+  // completes, which is why that write is conditional.
+  VkImageView ui_font_atlas_image_view = VK_NULL_HANDLE;
+  VkSampler ui_font_atlas_sampler = VK_NULL_HANDLE;
 
   // One host-visible buffer sub-divided into equally sized slots, one per
   // material instance. A single allocation rather than a buffer per instance:
@@ -466,6 +496,8 @@ private:
   friend auto WriteTransientDescriptors(LuminaRenderer *renderer,
                                         FrameContext &frame_context,
                                         VkDescriptorSet descriptor_set) -> void;
+  friend auto WriteUIDescriptors(LuminaRenderer *renderer,
+                                 VkDescriptorSet descriptor_set) -> void;
 };
 
 } // namespace lumina::renderer

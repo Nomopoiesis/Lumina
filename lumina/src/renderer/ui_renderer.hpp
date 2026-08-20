@@ -9,8 +9,11 @@
 
 namespace lumina::renderer {
 
-// Manages the 2D UI rendering pipeline and per-frame dynamic vertex/index
-// buffers. Operates entirely within the existing dynamic rendering pass.
+// Owns the per-frame dynamic vertex/index buffers for the UI and records its
+// draws. It no longer owns a pipeline, a pipeline layout, a descriptor set
+// layout or a descriptor pool: the UI goes through the material template and
+// graphics pipeline path like everything else, and its font atlas lives in the
+// Screen2D family's set 0, which the frame context allocates.
 class UIRenderer {
 public:
   UIRenderer() noexcept = default;
@@ -20,37 +23,28 @@ public:
   auto operator=(UIRenderer &&) -> UIRenderer & = delete;
   ~UIRenderer() noexcept = default;
 
-  auto Initialize(VulkanContext &ctx, const std::string &vert_spv_path,
-                  const std::string &frag_spv_path, VkFormat depth_format)
-      -> void;
+  auto Initialize(VulkanContext &ctx) -> void;
   auto Shutdown(VulkanContext &ctx) -> void;
-
-  // Called from the render-thread completion callback once the font atlas
-  // upload finishes. Updates all per-frame descriptor sets.
-  auto SetFontAtlas(VulkanContext &ctx, VkImageView image_view,
-                    VkSampler sampler) -> void;
 
   // Record UI draw commands into cmd_buf for the current frame.
   // batch must remain valid until vkQueueSubmit for this frame.
+  //
+  // The caller supplies the resolved pipeline, its layout and the Screen2D
+  // descriptor set, because resolving a pipeline handle reads the registries
+  // the render thread mutates and that lookup belongs with the other record
+  // time lookups.
   auto RecordCommands(VkCommandBuffer cmd_buf, u32 frame_index,
                       const UIRenderBatch &batch, u32 screen_width,
-                      u32 screen_height, VulkanContext &ctx) -> void;
+                      u32 screen_height, VkPipeline pipeline,
+                      VkPipelineLayout pipeline_layout,
+                      const std::vector<VkPushConstantRange> &push_ranges,
+                      VkDescriptorSet font_atlas_set) -> void;
 
 private:
   static constexpr u32 kMaxVertices = 65536;
   static constexpr u32 kMaxIndices = 262144;
 
-  auto CreatePipeline(VulkanContext &ctx, const std::string &vert_spv_path,
-                      const std::string &frag_spv_path, VkFormat depth_format)
-      -> void;
   auto CreateBuffers(VulkanContext &ctx) -> void;
-  auto CreateDescriptors(VulkanContext &ctx) -> void;
-
-  VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
-  VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
-  VkPipeline pipeline = VK_NULL_HANDLE;
-
-  VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 
   // Per-frame-in-flight resources
   struct FrameResources {
@@ -61,12 +55,8 @@ private:
     VkBuffer index_buffer = VK_NULL_HANDLE;
     VkDeviceMemory index_buffer_memory = VK_NULL_HANDLE;
     void *index_mapped = nullptr;
-
-    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
   };
   FrameResources frame_resources[MAX_FRAMES_IN_FLIGHT];
-
-  bool font_atlas_bound = false;
 };
 
 } // namespace lumina::renderer

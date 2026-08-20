@@ -44,11 +44,14 @@ def detect_stage(glsl_path: Path) -> str:
     return stage
 
 
-def write_temp_wrapper(tmp_dir: Path, glsl_file: str, shader_stage: str) -> Path:
-    tmp_file = tmp_dir / f"{glsl_file}.reflect"
+def write_temp_wrapper(tmp_dir: Path, include_path: str, base_name: str, shader_stage: str) -> Path:
+    # include_path is relative to IFACE_DIR (e.g. "stages/lit_mesh.vert.glsl"),
+    # because that is the one directory passed to glslc as -I. Using the bare
+    # filename would only resolve for interfaces sitting at the root.
+    tmp_file = tmp_dir / f"{base_name}.glsl.reflect"
     stub = "void main() { gl_Position = vec4(0.0); }" if shader_stage == "vertex" else "void main() {}"
     tmp_file.write_text(
-        f'#version 450\n#include "{glsl_file}"\n{stub}\n',
+        f'#version 450\n#include "{include_path}"\n{stub}\n',
         encoding="utf-8",
     )
     return tmp_file
@@ -56,8 +59,9 @@ def write_temp_wrapper(tmp_dir: Path, glsl_file: str, shader_stage: str) -> Path
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python spirv_generate_interface.py <file_name>.glsl")
-        print("Example: python spirv_generate_interface.py standard_lit.vert.glsl")
+        print("Usage: python spirv_generate_interface.py <path/to/file>.glsl")
+        print("  path may be relative to the interfaces dir or to the repo root")
+        print("Example: python spirv_generate_interface.py stages/lit_mesh.vert.glsl")
         sys.exit(1)
 
     glsl_path = Path(sys.argv[1])
@@ -65,16 +69,26 @@ def main():
         print(f"Error: Expected a .glsl file, got '{glsl_path}'")
         sys.exit(1)
 
-    glsl_file = glsl_path.name          # e.g. simple_model_input.vert.glsl
-    base_name = glsl_path.stem          # e.g. simple_model_input.vert
-    shader_stage = detect_stage(glsl_path)
+    # Accept either form: "stages/lit_mesh.vert.glsl" or the full path from the
+    # repo root. Everything downstream needs the path relative to IFACE_DIR,
+    # since that is what -I resolves against.
+    if (IFACE_DIR / glsl_path).is_file():
+        include_path = glsl_path.as_posix()
+    elif glsl_path.is_file():
+        include_path = glsl_path.resolve().relative_to(IFACE_DIR.resolve()).as_posix()
+    else:
+        print(f"Error: '{glsl_path}' not found under {IFACE_DIR} or as given")
+        sys.exit(1)
+
+    base_name = Path(include_path).stem  # e.g. lit_mesh.vert
+    shader_stage = detect_stage(Path(include_path))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     tmp_dir = Path(tempfile.gettempdir()) / "lumina_reflect_tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    tmp_file = write_temp_wrapper(tmp_dir, glsl_file, shader_stage)
+    tmp_file = write_temp_wrapper(tmp_dir, include_path, base_name, shader_stage)
     spv_file = tmp_dir / f"{base_name}.spv"
     out_header = OUT_DIR / f"{base_name}.hpp"
 

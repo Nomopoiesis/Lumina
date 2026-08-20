@@ -5,7 +5,7 @@
 #include "math/vector.hpp"
 #include "renderer/shaders/shader_layout.hpp"
 
-namespace lumina::shaders::in_id_out_id::frag {
+namespace lumina::shaders::ui_2d::frag {
 static constexpr lumina::renderer::ShaderLayout kLayout = {
     .stage = lumina::renderer::ShaderStage::Fragment,
     .binding_count = 0,
@@ -13,4 +13,4 @@ static constexpr lumina::renderer::ShaderLayout kLayout = {
     .push_constant_size = 0,
     .push_constant_offset = 0,
     .vertex_input_layout = {}};
-} // namespace lumina::shaders::in_id_out_id::frag
+} // namespace lumina::shaders::ui_2d::frag

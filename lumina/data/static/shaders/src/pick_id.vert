@@ -1,8 +1,7 @@
 #version 450
 
-#include "interface.global.glsl"
 
-#include "../interfaces/in_position_out_id.vert.glsl"
+#include "stages/pick_id.vert.glsl"
 
 void main() {
   // pc.model carries a *pre-multiplied* model * view * pick_proj, not a model

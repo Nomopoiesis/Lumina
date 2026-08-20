@@ -194,6 +194,13 @@ static auto AttributeTypeFromName(const std::string &name) -> std::string {
   if (lower.find("tex") != std::string::npos ||
       lower.find("uv") != std::string::npos)
     return "lumina::core::VertexAttributeType::TexCoord";
+  // Application-defined channels are opted into by name rather than inferred:
+  // "custom0" is a claim that the engine knows what this data means, whereas
+  // every match above is a guess from a conventional name. Falling back to
+  // Custom0 for anything unrecognized would turn a typo into a silently
+  // mismatched vertex layout.
+  if (lower.find("custom0") != std::string::npos)
+    return "lumina::core::VertexAttributeType::Custom0";
   ASSERT(false, "Unrecognized vertex input variable name — add a naming "
                 "convention match");
   return "lumina::core::VertexAttributeType::Position";
@@ -209,6 +216,8 @@ static auto ElementTypeFromFormat(SpvReflectFormat format) -> std::string {
       return "lumina::core::ElementType::Vec3";
     case SPV_REFLECT_FORMAT_R32G32B32A32_SFLOAT:
       return "lumina::core::ElementType::Vec4";
+    case SPV_REFLECT_FORMAT_R32_UINT:
+      return "lumina::core::ElementType::Uint32";
     default:
       ASSERT(false, "Unsupported vertex input format");
       return "lumina::core::ElementType::Float";

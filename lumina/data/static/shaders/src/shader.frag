@@ -1,14 +1,15 @@
 #version 450
 
-#include "interface.global.glsl"
+#include "blocks/view.glsl"
+#include "blocks/lighting.glsl"
 
-#include "simple_input_basic_mat.frag.glsl"
+#include "stages/lit_mesh.frag.glsl"
 
 void main() {
   vec3 normal = normalize(fragWorldNormal);
   vec3 ambient =
       material_uniforms.ambient_intensity * material_uniforms.ambient_color;
-  PointLight point_light = frame_globals.point_lights[0];
+  PointLight point_light = lighting.point_lights[0];
   vec3 light_direction = normalize(point_light.position - fragWorldPosition);
   vec3 view_direction = normalize(frame_globals.camera_position - fragWorldPosition);
   vec3 reflect_direction = reflect(-light_direction, normal);

@@ -3,13 +3,18 @@
 #include "common/lumina_check.hpp"
 #include "common/path_registry.hpp"
 #include "headers/color_output.frag.hpp"
-#include "headers/in_id_out_id.frag.hpp"
-#include "headers/in_position_out_id.vert.hpp"
-#include "headers/interface.global.hpp"
+#include "headers/lit_mesh.frag.hpp"
+#include "headers/lit_mesh.vert.hpp"
+#include "headers/pick_id.frag.hpp"
+#include "headers/pick_id.vert.hpp"
 #include "headers/position_only.vert.hpp"
-#include "headers/simple_input_basic_mat.frag.hpp"
-#include "headers/simple_model_input.vert.hpp"
+#include "headers/scene3d.global.hpp"
+#include "headers/screen2d.global.hpp"
+#include "headers/ui_2d.frag.hpp"
+#include "headers/ui_2d.vert.hpp"
 #include "renderer.hpp"
+
+#include <iterator>
 
 #include "vk_helpers.hpp"
 
@@ -18,14 +23,14 @@
 namespace lumina::renderer {
 
 auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
-  namespace global = lumina::shaders::interface::global;
-  namespace vert = lumina::shaders::simple_model_input::vert;
-  namespace frag = lumina::shaders::simple_input_basic_mat::frag;
+  namespace global = lumina::shaders::scene3d::global;
+  namespace vert = lumina::shaders::lit_mesh::vert;
+  namespace frag = lumina::shaders::lit_mesh::frag;
 
   auto shader_interface_result = ShaderInterface::Create(
       renderer->GetVulkanContext().GetDevice(), vert::kLayout, frag::kLayout,
-      "standard_lit", renderer->GetGlobalDescriptorSetLayout(),
-      global::kLayout);
+      "standard_lit",
+      renderer->GetGlobalDescriptorSetLayout(GlobalShaderFamily::Scene3D));
   if (!shader_interface_result) {
     LOG_CRITICAL("Failed to create shader interface: {}",
                  shader_interface_result.error().message);
@@ -61,7 +66,7 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
   auto dbg_interface_result = ShaderInterface::Create(
       renderer->GetVulkanContext().GetDevice(), dbg_vert::kLayout,
       dbg_frag::kLayout, "debug_wireframe",
-      renderer->GetGlobalDescriptorSetLayout(), global::kLayout);
+      renderer->GetGlobalDescriptorSetLayout(GlobalShaderFamily::Scene3D));
   if (!dbg_interface_result) {
     LOG_CRITICAL("Failed to create debug wireframe shader interface: {}",
                  dbg_interface_result.error().message);
@@ -88,12 +93,12 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
 
   renderer->SetDebugWireframeMaterialTemplate(dbg_mat_template_handle);
 
-  namespace pick_id_vert = lumina::shaders::in_position_out_id::vert;
-  namespace pick_id_frag = lumina::shaders::in_id_out_id::frag;
+  namespace pick_id_vert = lumina::shaders::pick_id::vert;
+  namespace pick_id_frag = lumina::shaders::pick_id::frag;
   auto pick_interface_result = ShaderInterface::Create(
       renderer->GetVulkanContext().GetDevice(), pick_id_vert::kLayout,
       pick_id_frag::kLayout, "pick_id",
-      renderer->GetGlobalDescriptorSetLayout(), global::kLayout);
+      renderer->GetGlobalDescriptorSetLayout(GlobalShaderFamily::Scene3D));
   if (!pick_interface_result) {
     LOG_CRITICAL("Failed to create pick id shader interface: {}",
                  pick_interface_result.error().message);
@@ -118,100 +123,147 @@ auto BuildStaticMaterialTemplates(LuminaRenderer *renderer) -> void {
       renderer->CreateMaterialTemplate(pick_id_mat_desc);
 
   renderer->SetPickIdMaterialTemplate(pick_id_mat_template_handle);
+
+  // Screen-space UI. The only template in the Screen2D family, and the only one
+  // whose set 0 is not the scene's — which is the whole reason the family
+  // exists: the font atlas is shared by every UI draw, so it belongs in the
+  // pass's global set rather than in a per-material one.
+  //
+  // No set 1 and no material instances: ui_2d::frag declares no bindings of its
+  // own, so max_instances stays 0 and nothing claims a material uniform slot.
+  namespace ui_vert = lumina::shaders::ui_2d::vert;
+  namespace ui_frag = lumina::shaders::ui_2d::frag;
+  auto ui_interface_result = ShaderInterface::Create(
+      renderer->GetVulkanContext().GetDevice(), ui_vert::kLayout,
+      ui_frag::kLayout, "ui_2d",
+      renderer->GetGlobalDescriptorSetLayout(GlobalShaderFamily::Screen2D));
+  if (!ui_interface_result) {
+    LOG_CRITICAL("Failed to create UI shader interface: {}",
+                 ui_interface_result.error().message);
+    LUMINA_TERMINATE();
+  }
+  auto ui_interface_index =
+      renderer->AddShaderInterface(std::move(ui_interface_result.value()));
+
+  MaterialTemplateDescription ui_mat_desc = {
+      .shader_interface_index = ui_interface_index,
+      .vertex_layout = ui_vert::kLayout,
+      .fragment_layout = ui_frag::kLayout,
+      .vertex_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                    .shaders.Resolve("ui.vert.spv")
+                                    .string(),
+      .fragment_shader_bin_path = lumina::common::PathRegistry::Instance()
+                                      .shaders.Resolve("ui.frag.spv")
+                                      .string(),
+      .max_instances = 0,
+  };
+  renderer->SetUIMaterialTemplate(
+      renderer->CreateMaterialTemplate(ui_mat_desc));
 }
+
+namespace {
+
+// Both families' set 0 layouts are built the same way — only the reflected
+// binding list differs — so the family table is the one place that names them.
+struct GlobalShaderFamilyBindings {
+  GlobalShaderFamily family;
+  const ShaderBindingInfo *bindings;
+  u32 binding_count;
+};
+
+constexpr GlobalShaderFamilyBindings kGlobalShaderFamilyBindings[] = {
+    {GlobalShaderFamily::Scene3D, lumina::shaders::scene3d::global::kBindings,
+     lumina::shaders::scene3d::global::kLayout.binding_count},
+    {GlobalShaderFamily::Screen2D, lumina::shaders::screen2d::global::kBindings,
+     lumina::shaders::screen2d::global::kLayout.binding_count},
+};
+
+static_assert(
+    std::size(kGlobalShaderFamilyBindings) == kGlobalShaderFamilyCount,
+    "Every GlobalShaderFamily needs a binding list, or its set 0 layout is "
+    "never created and every shader in it binds a null set");
+
+} // namespace
 
 auto CreateGlobalDescriptorSetLayout(LuminaRenderer *renderer)
     -> std::expected<void, VkInitializationError> {
-  namespace g = lumina::shaders::interface::global;
-
   auto *device = renderer->vulkan_context.GetDevice();
 
-  std::vector<VkDescriptorSetLayoutBinding> bindings;
-  bindings.reserve(g::kLayout.binding_count);
-  for (u32 i = 0; i < g::kLayout.binding_count; ++i) {
-    const auto &b = g::kBindings[i];
-    bindings.push_back({
-        .binding = b.binding,
-        .descriptorType = ToVkDescriptorType(b.type),
-        .descriptorCount = b.array_count,
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        .pImmutableSamplers = nullptr,
-    });
+  for (const auto &family : kGlobalShaderFamilyBindings) {
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
+    bindings.reserve(family.binding_count);
+    for (u32 i = 0; i < family.binding_count; ++i) {
+      const auto &b = family.bindings[i];
+      bindings.push_back({
+          .binding = b.binding,
+          .descriptorType = ToVkDescriptorType(b.type),
+          .descriptorCount = b.array_count,
+          // Both stages, rather than the stage that declared it: the layout is
+          // shared by every shader in the family, and they do not agree on
+          // which stage reads what.
+          .stageFlags =
+              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+          .pImmutableSamplers = nullptr,
+      });
+    }
+
+    VkDescriptorSetLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .bindingCount = static_cast<u32>(bindings.size()),
+        .pBindings = bindings.data(),
+    };
+
+    if (auto result = vkCreateDescriptorSetLayout(
+            device, &layout_info, nullptr,
+            &renderer
+                 ->global_descriptor_set_layouts[FamilyIndex(family.family)]);
+        result != VK_SUCCESS) {
+      return std::unexpected(VkInitializationError{
+          .message = "Failed to create global descriptor set layout: " +
+                     std::string(string_VkResult(result))});
+    }
   }
 
-  VkDescriptorSetLayoutCreateInfo layout_info = {
-      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .bindingCount = static_cast<u32>(bindings.size()),
-      .pBindings = bindings.data(),
-  };
-
-  if (auto result =
-          vkCreateDescriptorSetLayout(device, &layout_info, nullptr,
-                                      &renderer->global_descriptor_set_layout);
-      result != VK_SUCCESS) {
-    return std::unexpected(VkInitializationError{
-        .message = "Failed to create global descriptor set layout: " +
-                   std::string(string_VkResult(result))});
-  }
-
-  // Create a pipeline layout with only set 0, used for binding the global
-  // descriptor set. Push constant ranges must match those of the full pipeline
-  // layouts for Vulkan compatibility.
-  std::vector<VkPushConstantRange> push_constant_ranges;
-  if (g::kLayout.push_constant_size > 0) {
-    push_constant_ranges.push_back({
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = g::kLayout.push_constant_offset,
-        .size = g::kLayout.push_constant_size,
-    });
-  }
-
-  VkPipelineLayoutCreateInfo pipeline_layout_info = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .setLayoutCount = 1,
-      .pSetLayouts = &renderer->global_descriptor_set_layout,
-      .pushConstantRangeCount = static_cast<u32>(push_constant_ranges.size()),
-      .pPushConstantRanges = push_constant_ranges.data(),
-  };
-
-  if (auto result =
-          vkCreatePipelineLayout(device, &pipeline_layout_info, nullptr,
-                                 &renderer->global_pipeline_layout);
-      result != VK_SUCCESS) {
-    return std::unexpected(VkInitializationError{
-        .message = "Failed to create global pipeline layout: " +
-                   std::string(string_VkResult(result))});
-  }
-
+  // There is deliberately no standalone "set 0 only" pipeline layout here any
+  // more. Layout compatibility compares push constant ranges as well as
+  // descriptor set layouts, and ranges are now per shader, so no single layout
+  // can be compatible with every pipeline that shares this set. One that was
+  // compatible with only some of them would bind correctly right up until it
+  // silently did not. Set 0 is bound through each shader interface's own
+  // pipeline layout instead — see RecordCommandBuffer.
   return {};
 }
 
+// Sized for every family, because one transient pool per frame serves them all.
 auto GetGlobalDescriptorPoolSizes(std::vector<VkDescriptorPoolSize> &pool_sizes)
     -> void {
-  namespace g = lumina::shaders::interface::global;
-  pool_sizes.reserve(g::kLayout.binding_count);
-  for (const auto &kBinding : g::kBindings) {
-    pool_sizes.push_back({
-        .type = ToVkDescriptorType(kBinding.type),
-        .descriptorCount = kBinding.array_count,
-    });
+  for (const auto &family : kGlobalShaderFamilyBindings) {
+    for (u32 i = 0; i < family.binding_count; ++i) {
+      const auto &binding = family.bindings[i];
+      pool_sizes.push_back({
+          .type = ToVkDescriptorType(binding.type),
+          .descriptorCount = binding.array_count,
+      });
+    }
   }
 }
 
 auto GetFrameGlobalsBufferSize() -> VkDeviceSize {
-  return sizeof(shaders::interface::global::FrameGlobals);
+  return sizeof(shaders::scene3d::global::FrameGlobals);
+}
+
+auto GetLightingBufferSize() -> VkDeviceSize {
+  return sizeof(shaders::scene3d::global::Lighting);
 }
 
 auto GetDefaultMaterialUBOSize() -> VkDeviceSize {
-  return sizeof(shaders::simple_input_basic_mat::frag::MaterialUniforms);
+  return sizeof(shaders::lit_mesh::frag::MaterialUniforms);
 }
 
 auto InitDefaultMaterialUBO(void *mapped_data) -> void {
-  using MU = shaders::simple_input_basic_mat::frag::MaterialUniforms;
+  using MU = shaders::lit_mesh::frag::MaterialUniforms;
   auto *mu = static_cast<MU *>(mapped_data);
   mu->ambient_intensity = 0.05F;
   mu->ambient_color = {1.0F, 1.0F, 1.0F};
@@ -225,7 +277,7 @@ namespace {
 auto WriteLitDescriptorsFor(LuminaRenderer *renderer,
                             const MaterialInstance &instance, VkSampler sampler,
                             VkImageView image_view) -> void {
-  namespace mat = shaders::simple_input_basic_mat::frag;
+  namespace mat = shaders::lit_mesh::frag;
 
   mat::BindingData bindings{
       .texSampler_sampler = sampler,
@@ -248,7 +300,7 @@ auto WriteLitDescriptorsFor(LuminaRenderer *renderer,
 auto SetLitMaterialDiffuseColor(LuminaRenderer *renderer,
                                 MaterialInstanceHandle instance_handle,
                                 const math::Vec3 &diffuse_color) -> void {
-  using MU = shaders::simple_input_basic_mat::frag::MaterialUniforms;
+  using MU = shaders::lit_mesh::frag::MaterialUniforms;
 
   auto instance_opt = renderer->material_instance_manager.Get(instance_handle);
   LUMINA_CHECK(instance_opt.has_value(), "Material instance not found");
@@ -309,14 +361,29 @@ auto CreateLitMaterialInstance(LuminaRenderer *renderer,
   return instance_handle;
 }
 
+// The Screen2D family's set 0. Separate from WriteTransientDescriptors because
+// it has no per-frame inputs at all — the atlas view and sampler are whatever
+// the upload published — and because it must not be written before that upload
+// completes.
+auto WriteUIDescriptors(LuminaRenderer *renderer,
+                        VkDescriptorSet descriptor_set) -> void {
+  namespace ui_global = shaders::screen2d::global;
+  ui_global::WriteDescriptors(
+      renderer->vulkan_context.GetDevice(), descriptor_set,
+      {.font_atlas_sampler = renderer->ui_font_atlas_sampler,
+       .font_atlas_imageView = renderer->ui_font_atlas_image_view});
+}
+
 auto WriteTransientDescriptors(LuminaRenderer *renderer,
                                FrameContext &frame_context,
                                VkDescriptorSet descriptor_set) -> void {
-  namespace global = shaders::interface::global;
+  namespace global = shaders::scene3d::global;
+  auto &scene3d = frame_context.GetShaderFamilyScene3DResources();
   global::WriteDescriptors(
       renderer->vulkan_context.GetDevice(), descriptor_set,
-      {.frame_globals_buffer = frame_context.GetUniformBuffer().buffer,
-       .instance_data_buffer = frame_context.GetInstanceBuffer().buffer});
+      {.frame_globals_buffer = scene3d.frame_globals.buffer,
+       .instance_data_buffer = frame_context.GetInstanceBuffer().buffer,
+       .lighting_buffer = scene3d.lighting.buffer});
 }
 
 } // namespace lumina::renderer
